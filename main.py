@@ -16,11 +16,12 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self, radius):
+    def __init__(self, radius, fov):
         super().__init__(all_sprites)
         self.x = width // 2
         self.y = height // 2
         self.radius = radius
+        self.fov = fov  # Угол обзора игрока
         self.image = pygame.Surface((2 * radius, 2 * radius),
                                     pygame.SRCALPHA, 32)
         pygame.draw.circle(self.image, 'white',
@@ -30,18 +31,27 @@ class Player(pygame.sprite.Sprite):
 
     def ray_cast(self):
         mx, my = pygame.mouse.get_pos()
-        view_angle = atan2(my - self.y, mx - self.x)
-        collide_walls = [wall.rect for wall in walls]
+        view_angle = atan2(my - self.y, mx - self.x)  # Считает угол относительно курсора
+        collide_walls = [wall.rect for wall in walls]  # Спиоск всех преград
 
+        # Начальные координаты многоугольника, по которому рисуется рейкаст
         coords = [(self.x + self.radius, self.y + self.radius)]
-        for a in range(-50, 51):
-            cos_a = cos(view_angle + a / 50)
-            sin_a = sin(view_angle + a / 50)
+        for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
+            # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
+            # На 100 делится для точности и птушо в for пихается тока целые числа,
+            # а fov у нас в радианах (радианы если шо от 0 до 6.3, а ля 0 до 360 в градусах)
+            cos_a = cos(view_angle + a / 100)
+            sin_a = sin(view_angle + a / 100)
+            # Задаем rect как точку концов линий рейкаста
             point = pygame.Rect(self.x, self.y, 1, 1)
+
+            # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
+            # но ниже точность рейкаста
             for c in range(0, 500, 20):
                 point.x = self.x + c * cos_a
                 point.y = self.y + c * sin_a
-                if point.collidelistall(collide_walls):
+                if point.collidelistall(collide_walls):  # Если точка достигает стены
+                    # Тут уже начинается подгон точки под границы ректа бинарным поиском
                     l, r = c - 50, c
                     while r - l > 1:
                         m = (r + l) / 2
@@ -54,6 +64,7 @@ class Player(pygame.sprite.Sprite):
                     break
             coords.append((point.x, point.y))
 
+        #  Наконец рисуем полигон
         pygame.draw.polygon(screen, pygame.Color(255, 255, 255, a=255), coords)
 
     def update(self):
@@ -73,6 +84,7 @@ class Player(pygame.sprite.Sprite):
 
 class Map:
     def __init__(self):
+        #  Это карта уровня
         map = [['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'],
                ['#', ' ', ' ', ' ', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#'],
                ['#', ' ', ' ', ' ', '#', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
@@ -104,7 +116,7 @@ if __name__ == '__main__':
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
 
-    player = Player(10)
+    player = Player(10, 80)
     map = Map()
 
     v = 3
