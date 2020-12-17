@@ -28,11 +28,11 @@ class Player(pygame.sprite.Sprite):
                            (radius, radius), radius)
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(self.x, self.y, 2 * radius, 2 * radius)
+        self.obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
 
     def ray_cast(self):
         mx, my = pygame.mouse.get_pos()
         view_angle = atan2(my - self.y, mx - self.x)  # Считает угол относительно курсора
-        collide_walls = [wall.rect for wall in walls]  # Спиоск всех преград
 
         # Начальные координаты многоугольника, по которому рисуется рейкаст
         coords = [(self.x + self.radius, self.y + self.radius)]
@@ -47,17 +47,17 @@ class Player(pygame.sprite.Sprite):
 
             # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
             # но ниже точность рейкаста
-            for c in range(0, 500, 20):
+            for c in range(0, 1000, 20):
                 point.x = self.x + c * cos_a
                 point.y = self.y + c * sin_a
-                if point.collidelistall(collide_walls):  # Если точка достигает стены
+                if point.collidelistall(self.obstacles):  # Если точка достигает стены
                     # Тут уже начинается подгон точки под границы ректа бинарным поиском
                     l, r = c - 50, c
                     while r - l > 1:
                         m = (r + l) / 2
                         point.x = self.x + m * cos_a
                         point.y = self.y + m * sin_a
-                        if point.collidelistall(collide_walls):
+                        if point.collidelistall(self.obstacles):
                             r = m
                         else:
                             l = m
@@ -110,16 +110,18 @@ class Map:
 
 if __name__ == '__main__':
     pygame.init()
-    size = width, height = 800, 600
+    display_info = pygame.display.Info()
+    #  Достаются значения разрешения экрана из display_info
+    size = width, height = display_info.current_w, display_info.current_h
     screen = pygame.display.set_mode(size)
 
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
 
-    player = Player(10, 80)
     map = Map()
+    player = Player(10, 90)
 
-    v = 3
+    v = 7.5
     fps = 60
     clock = pygame.time.Clock()
     running = True
@@ -130,8 +132,6 @@ if __name__ == '__main__':
 
         screen.fill('black')
         all_sprites.draw(screen)
-        all_sprites.update()
         player.update()
         pygame.display.flip()
         clock.tick(fps)
-        print(clock.get_fps())
