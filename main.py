@@ -32,10 +32,11 @@ class Player(pygame.sprite.Sprite):
 
     def ray_cast(self):
         mx, my = pygame.mouse.get_pos()
-        view_angle = atan2(my - self.y, mx - self.x)  # Считает угол относительно курсора
-
+        x, y = self.x + self.radius, self.y + self.radius
+        aim_x, aim_y = x, y
+        view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
         # Начальные координаты многоугольника, по которому рисуется рейкаст
-        coords = [(self.x + self.radius, self.y + self.radius)]
+        coords = [(x, y)]
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
             # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
             # На 100 делится для точности и птушо в for пихается тока целые числа,
@@ -43,42 +44,72 @@ class Player(pygame.sprite.Sprite):
             cos_a = cos(view_angle + a / 100)
             sin_a = sin(view_angle + a / 100)
             # Задаем rect как точку концов линий рейкаста
-            point = pygame.Rect(self.x, self.y, 1, 1)
+            point = pygame.Rect(x, y, 1, 1)
 
             # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
             # но ниже точность рейкаста
             for c in range(0, 1000, 20):
-                point.x = self.x + c * cos_a
-                point.y = self.y + c * sin_a
+                point.x = x + c * cos_a
+                point.y = y + c * sin_a
                 if point.collidelistall(self.obstacles):  # Если точка достигает стены
                     # Тут уже начинается подгон точки под границы ректа бинарным поиском
                     l, r = c - 50, c
                     while r - l > 1:
                         m = (r + l) / 2
-                        point.x = self.x + m * cos_a
-                        point.y = self.y + m * sin_a
+                        point.x = x + m * cos_a
+                        point.y = y + m * sin_a
                         if point.collidelistall(self.obstacles):
                             r = m
                         else:
                             l = m
                     break
+            if a == 0:
+                aim_x, aim_y = point.x, point.y
             coords.append((point.x, point.y))
 
         #  Наконец рисуем полигон
-        pygame.draw.polygon(screen, pygame.Color(255, 255, 255, a=255), coords)
+        pygame.draw.polygon(screen, pygame.Color(255, 255, 255), coords)
+        pygame.draw.line(screen, 'red', (x, y),
+                         (aim_x, aim_y))
 
-    def update(self):
+    def movement(self, dx, dy):
+        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
+        # Изменение по x
+        self.rect.x += dx
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dx < 0:
+                    self.rect.left = block.right
+                elif dx > 0:
+                    self.rect.right = block.left
+                break
+
+        # Изменение по y
+        self.rect.y += dy
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dy < 0:
+                    self.rect.top = block.bottom
+                elif dy > 0:
+                    self.rect.bottom = block.top
+                break
+
+    def move_character(self):
+        # Здесь происходит управление игроком
         keys = pygame.key.get_pressed()
         if keys[pygame.K_w]:
-            self.y -= v
+            self.movement(0, -v)
         if keys[pygame.K_s]:
-            self.y += v
+            self.movement(0, v)
         if keys[pygame.K_a]:
-            self.x -= v
+            self.movement(-v, 0)
         if keys[pygame.K_d]:
-            self.x += v
-        self.rect.x = self.x
-        self.rect.y = self.y
+            self.movement(v, 0)
+        self.x = self.rect.x
+        self.y = self.rect.y
+
+    def update(self):
+        self.move_character()
         self.ray_cast()
 
 
@@ -121,7 +152,7 @@ if __name__ == '__main__':
     map = Map()
     player = Player(10, 90)
 
-    v = 7.5
+    v = 5
     fps = 60
     clock = pygame.time.Clock()
     running = True
@@ -135,3 +166,4 @@ if __name__ == '__main__':
         player.update()
         pygame.display.flip()
         clock.tick(fps)
+        print(clock.get_fps())
