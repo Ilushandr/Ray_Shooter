@@ -15,9 +15,16 @@ class Wall(pygame.sprite.Sprite):
         pass
 
 
-class Player(pygame.sprite.Sprite):
-    def __init__(self, radius, fov):
+class Gamer(pygame.sprite.Sprite):
+    def __init__(self):
         super().__init__(all_sprites)
+        self.hp = 100
+        self.damage = 10
+
+
+class Player(Gamer):
+    def __init__(self, radius, fov):
+        super(Player, self).__init__()
         self.x = width // 2
         self.y = height // 2
         self.radius = radius
@@ -28,14 +35,15 @@ class Player(pygame.sprite.Sprite):
                            (radius, radius), radius)
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(self.x, self.y, 2 * radius, 2 * radius)
+        self.obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
 
     def ray_cast(self):
         mx, my = pygame.mouse.get_pos()
-        view_angle = atan2(my - self.y, mx - self.x)  # Считает угол относительно курсора
-        collide_walls = [wall.rect for wall in walls]  # Спиоск всех преград
-
+        x, y = self.x + self.radius, self.y + self.radius
+        aim_x, aim_y = x, y
+        view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
         # Начальные координаты многоугольника, по которому рисуется рейкаст
-        coords = [(self.x + self.radius, self.y + self.radius)]
+        coords = [(x, y)]
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
             # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
             # На 100 делится для точности и птушо в for пихается тока целые числа,
@@ -43,42 +51,72 @@ class Player(pygame.sprite.Sprite):
             cos_a = cos(view_angle + a / 100)
             sin_a = sin(view_angle + a / 100)
             # Задаем rect как точку концов линий рейкаста
-            point = pygame.Rect(self.x, self.y, 1, 1)
+            point = pygame.Rect(x, y, 1, 1)
 
             # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
             # но ниже точность рейкаста
-            for c in range(0, 500, 20):
-                point.x = self.x + c * cos_a
-                point.y = self.y + c * sin_a
-                if point.collidelistall(collide_walls):  # Если точка достигает стены
+            for c in range(0, 1000, 20):
+                point.x = x + c * cos_a
+                point.y = y + c * sin_a
+                if point.collidelistall(self.obstacles):  # Если точка достигает стены
                     # Тут уже начинается подгон точки под границы ректа бинарным поиском
                     l, r = c - 50, c
                     while r - l > 1:
                         m = (r + l) / 2
-                        point.x = self.x + m * cos_a
-                        point.y = self.y + m * sin_a
-                        if point.collidelistall(collide_walls):
+                        point.x = x + m * cos_a
+                        point.y = y + m * sin_a
+                        if point.collidelistall(self.obstacles):
                             r = m
                         else:
                             l = m
                     break
+            if a == 0:
+                aim_x, aim_y = point.x, point.y
             coords.append((point.x, point.y))
 
         #  Наконец рисуем полигон
-        pygame.draw.polygon(screen, pygame.Color(255, 255, 255, a=255), coords)
+        pygame.draw.polygon(screen, pygame.Color(255, 255, 255), coords)
+        pygame.draw.line(screen, 'red', (x, y),
+                         (aim_x, aim_y))
 
-    def update(self):
+    def movement(self, dx, dy):
+        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
+        # Изменение по x
+        self.rect.x += dx
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dx < 0:
+                    self.rect.left = block.right
+                elif dx > 0:
+                    self.rect.right = block.left
+                break
+
+        # Изменение по y
+        self.rect.y += dy
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dy < 0:
+                    self.rect.top = block.bottom
+                elif dy > 0:
+                    self.rect.bottom = block.top
+                break
+
+    def move_character(self):
+        # Здесь происходит управление игроком
         keys = pygame.key.get_pressed()
         if keys[pygame.K_w]:
-            self.y -= v
+            self.movement(0, -v)
         if keys[pygame.K_s]:
-            self.y += v
+            self.movement(0, v)
         if keys[pygame.K_a]:
-            self.x -= v
+            self.movement(-v, 0)
         if keys[pygame.K_d]:
-            self.x += v
-        self.rect.x = self.x
-        self.rect.y = self.y
+            self.movement(v, 0)
+        self.x = self.rect.x
+        self.y = self.rect.y
+
+    def update(self):
+        self.move_character()
         self.ray_cast()
 
 
@@ -108,18 +146,72 @@ class Map:
                     Wall(col * w, row * h, w, h)
 
 
+LIVE_MOBS = []
+
+
+class Mobs(Gamer):
+    def __init__(self, x, y, complexity):
+        super(Mobs, self).__init__()
+        self.x = x
+        self.y = y
+        if complexity == 1:
+            self.radius = 10
+        elif complexity == 2:
+            self.radius = 20
+        elif complexity == 3:
+            self.radius = 30
+        self.image = pygame.Surface((2 * self.radius, 2 * self.radius),
+                                    pygame.SRCALPHA, 32)
+        pygame.draw.circle(self.image, 'red',
+                           (self.radius, self.radius), self.radius)
+        self.mask = pygame.mask.from_surface(self.image)
+        self.rect = pygame.Rect(self.x, self.y, 2 * self.radius, 2 * self.radius)
+        self.obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
+        LIVE_MOBS.append((x, y, complexity))
+
+    def movement(self, dx, dy):
+        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
+        # Изменение по x
+        self.rect.x += dx
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dx < 0:
+                    self.rect.left = block.right
+                elif dx > 0:
+                    self.rect.right = block.left
+                break
+
+        # Изменение по y
+        self.rect.y += dy
+        for block in self.obstacles:
+            if self.rect.colliderect(block):
+                if dy < 0:
+                    self.rect.top = block.bottom
+                elif dy > 0:
+                    self.rect.bottom = block.top
+                break
+
+    def get_path(self):
+        pass
+
+    def update(self):
+        pass
+
+
 if __name__ == '__main__':
     pygame.init()
-    size = width, height = 800, 600
+    display_info = pygame.display.Info()
+    #  Достаются значения разрешения экрана из display_info
+    size = width, height = display_info.current_w, display_info.current_h
     screen = pygame.display.set_mode(size)
 
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
 
-    player = Player(10, 80)
     map = Map()
-
-    v = 3
+    player = Player(10, 90)
+    mob = Mobs(860, 540, 3)
+    v = 5
     fps = 60
     clock = pygame.time.Clock()
     running = True
@@ -127,11 +219,12 @@ if __name__ == '__main__':
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    exit()
         screen.fill('black')
         all_sprites.draw(screen)
-        all_sprites.update()
+        mob.update()
         player.update()
         pygame.display.flip()
         clock.tick(fps)
-        print(clock.get_fps())
