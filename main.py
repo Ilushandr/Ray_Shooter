@@ -1,4 +1,5 @@
 import pygame
+import numba
 from math import cos, sin, atan2, pi
 
 
@@ -18,23 +19,44 @@ class Wall(pygame.sprite.Sprite):
         pass
 
 
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, phi, v0, a):
+        super().__init__(bullets)
+        self.point = pygame.Rect(x, y, 1, 1)
+        self.phi = phi  # Угол полета пули
+        self.v = v0  # Скорость полета пули
+        self.a = a  # Ускорение пули
+
+        self.cos_phi = cos(phi)
+        self.sin_phi = sin(phi)
+
+        self.pos_x = x
+        self.pos_y = y
+
+    def update(self):
+        # Изменяем полеожение пули и ее скорость
+        if self.v <= 0 or self.point.collidelistall(obstacles):
+            self.kill()
+        # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
+        # большая погрешность
+        dx = self.v * self.cos_phi
+        dy = self.v * self.sin_phi
+        self.pos_x = self.pos_x + dx
+        self.pos_y = self.pos_y + dy
+        self.v += self.a
+
+        self.point.x = self.pos_x
+        self.point.y = self.pos_y
+        pygame.draw.line(screen, 'orange', (self.point.x, self.point.y),
+                         (self.point.x - dx, self.point.y - dy), 5)
+
+
 class Gun:
-    def __init__(self):
-        pass
-
-
-class Enemy(pygame.sprite.Sprite):
-    def __init__(self, x, y, radius=10):
-        super().__init__(all_sprites)
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.image = pygame.Surface((2 * radius, 2 * radius),
-                                    pygame.SRCALPHA, 32)
-        self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x, self.y, 2 * radius, 2 * radius)
-        pygame.draw.circle(self.image, 'red',
-                           (radius, radius), radius)
+    def shot(self, v0=30, a=-0.1):
+        mx, my = pygame.mouse.get_pos()
+        x, y = player.x + player.radius, player.y + player.radius
+        phi = atan2(my - y, mx - x)
+        Bullet(x, y, phi, v0, a)
 
 
 class Player(pygame.sprite.Sprite):
@@ -46,19 +68,26 @@ class Player(pygame.sprite.Sprite):
         self.fov = fov  # Угол обзора игрока
         self.image = pygame.Surface((2 * radius, 2 * radius),
                                     pygame.SRCALPHA, 32)
-        pygame.draw.circle(self.image, 'white',
-                           (radius, radius), radius)
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(self.x, self.y, 20, 20)
-        self.obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
-        self.enemies = [enemy for enemy in enemies]
+        self.aim_x, self.aim_y = x + radius, y + radius
+
+    def shoot(self):
+        gun.shot()
 
     def ray_cast(self):
         mx, my = pygame.mouse.get_pos()
         x, y = self.x + self.radius, self.y + self.radius
-        aim_x, aim_y = x, y
         view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
-        # Начальные координаты многоугольника, по которому рисуется рейкаст
+        coords = self.ray_cycle(view_angle, x, y)
+        self.draw_raycast(x, y, coords)
+
+    def draw_raycast(self, x, y, coords):
+        pygame.draw.polygon(screen, 'black', coords)
+        pygame.draw.line(screen, 'red', (x, y),
+                         (self.aim_x, self.aim_y))
+
+    def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
             # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
@@ -75,26 +104,23 @@ class Player(pygame.sprite.Sprite):
             for c in range(0, 1000, step):
                 point.x = x + c * cos_a
                 point.y = y + c * sin_a
-                if point.collidelistall(self.obstacles):  # Если точка достигает стены
+                if point.collidelistall(obstacles):  # Если точка достигает стены
                     # Тут уже начинается подгон точки под границы ректа бинарным поиском
                     l, r = c - step, c
                     while r - l > 1:
                         m = (r + l) / 2
                         point.x = x + m * cos_a
                         point.y = y + m * sin_a
-                        if point.collidelistall(self.obstacles):
+                        if point.collidelistall(obstacles):
                             r = m
                         else:
                             l = m
 
                     break
             if a == 0:
-                aim_x, aim_y = point.x, point.y
+                self.aim_x, self.aim_y = point.x, point.y
             coords.append((point.x, point.y))
-        # Наконец рисуем полигон
-        pygame.draw.polygon(screen, 'black', coords)
-        pygame.draw.line(screen, 'red', (x, y),
-                         (aim_x, aim_y))
+        return coords
 
     def start_ray_coords(self, x, y, a):
         if -pi <= a <= -pi / 2:
@@ -115,7 +141,7 @@ class Player(pygame.sprite.Sprite):
         # Изменение по x
         if dx:
             self.rect.x += dx
-            for block in self.obstacles:
+            for block in obstacles:
                 if self.rect.colliderect(block):
                     if dx < 0:
                         self.rect.left = block.right
@@ -126,7 +152,7 @@ class Player(pygame.sprite.Sprite):
         # Изменение по y
         if dy:
             self.rect.y += dy
-            for block in self.obstacles:
+            for block in obstacles:
                 if self.rect.colliderect(block):
                     if dy < 0:
                         self.rect.top = block.bottom
@@ -179,6 +205,14 @@ class Map:
                     Wall(col * w, row * h, w, h)
 
 
+def fps_counter():
+    font = pygame.font.Font(None, 20)
+    text = font.render(str(round(clock.get_fps(), 4)), True, 'white')
+    text_x = 0
+    text_y = 0
+    screen.blit(text, (text_x, text_y))
+
+
 if __name__ == '__main__':
     pygame.init()
     display_info = pygame.display.Info()
@@ -189,11 +223,14 @@ if __name__ == '__main__':
 
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
-    enemies = pygame.sprite.Group()
+    bullets = pygame.sprite.Group()
 
     map = Map()
-    Enemy(width // 4, height // 2, 20)
     player = Player(width // 2, height // 2, 90)
+    gun = Gun()
+
+    obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
+
     v = 5
     fps = 60
     clock = pygame.time.Clock()
@@ -202,12 +239,20 @@ if __name__ == '__main__':
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == pygame.BUTTON_LEFT:
+                    player.shoot()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    exit()
 
         screen.fill('white')
-
         all_sprites.draw(screen)
+        bullets.update()
         player.update()
+        fps_counter()
 
         pygame.display.flip()
         clock.tick(fps)
+
         print(clock.get_fps())
