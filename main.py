@@ -1,5 +1,6 @@
 import pygame
-import numba
+from numba import njit, prange
+from numba.typed import List
 from math import cos, sin, atan2, pi
 
 
@@ -52,11 +53,12 @@ class Bullet(pygame.sprite.Sprite):
 
 
 class Gun:
-    def shot(self, v0=30, a=-0.1):
+    def shot(self, v0=30, a=-0.5):
         mx, my = pygame.mouse.get_pos()
         x, y = player.x + player.radius, player.y + player.radius
         phi = atan2(my - y, mx - x)
-        Bullet(x, y, phi, v0, a)
+        for i in range(-5, 6):
+            Bullet(x, y, phi + i / 100, v0, a)
 
 
 class Player(pygame.sprite.Sprite):
@@ -90,36 +92,10 @@ class Player(pygame.sprite.Sprite):
     def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
-            # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
-            # На 100 делится для точности и птушо в for пихается тока целые числа,
-            # а fov у нас в радианах (радианы если шо от 0 до 6.3, а ля 0 до 360 в градусах)
-            cos_a = cos(view_angle + a / 100)
-            sin_a = sin(view_angle + a / 100)
-            # Задаем rect как точку концов линий рейкаста
-            point = pygame.Rect(x, y, 1, 1)
-
-            # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
-            # но ниже точность рейкаста
-            step = 15
-            for c in range(0, 1000, step):
-                point.x = x + c * cos_a
-                point.y = y + c * sin_a
-                if point.collidelistall(obstacles):  # Если точка достигает стены
-                    # Тут уже начинается подгон точки под границы ректа бинарным поиском
-                    l, r = c - step, c
-                    while r - l > 1:
-                        m = (r + l) / 2
-                        point.x = x + m * cos_a
-                        point.y = y + m * sin_a
-                        if point.collidelistall(obstacles):
-                            r = m
-                        else:
-                            l = m
-
-                    break
+            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles)
             if a == 0:
-                self.aim_x, self.aim_y = point.x, point.y
-            coords.append((point.x, point.y))
+                self.aim_x, self.aim_y = ray_x, ray_y
+            coords.append((ray_x, ray_y))
         return coords
 
     def start_ray_coords(self, x, y, a):
@@ -205,6 +181,42 @@ class Map:
                     Wall(col * w, row * h, w, h)
 
 
+@njit(parallel=True, fastmath=True)
+def calc_cycle(x, y, a, obstacles):
+    step = 10
+    ray_x = x
+    ray_y = y
+    cos_a = cos(a)
+    sin_a = sin(a)
+
+    found = False
+    for length in prange(0, 1000):
+        if found:
+            return ray_x, ray_y
+
+        length *= step
+        ray_x = x + length * cos_a
+        ray_y = y + length * sin_a
+
+        for ox, oy, w, h in obstacles:
+            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                l, r = length - step, length
+                while r - l > 1:
+                    left = True
+                    m = (r + l) / 2
+                    ray_x = x + m * cos_a
+                    ray_y = y + m * sin_a
+                    for ox, oy, w, h in obstacles:
+                        if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                            left = False
+                            r = m
+                            break
+                    if left:
+                        l = m
+                found = True
+    return ray_x, ray_y
+
+
 def fps_counter():
     font = pygame.font.Font(None, 20)
     text = font.render(str(round(clock.get_fps(), 4)), True, 'white')
@@ -230,8 +242,9 @@ if __name__ == '__main__':
     gun = Gun()
 
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
-
-    v = 5
+    ray_obstacles = List([(wall.rect.x, wall.rect.y,
+                           wall.rect.w, wall.rect.h) for wall in walls])  # Спиоск всех преград
+    v = 10
     fps = 60
     clock = pygame.time.Clock()
     running = True
