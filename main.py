@@ -36,8 +36,10 @@ class Bullet(pygame.sprite.Sprite):
 
     def update(self):
         # Изменяем полеожение пули и ее скорость
-        if self.v <= 0 or self.point.collidelistall(obstacles):
+        if self.v <= 0:
             self.kill()
+        elif self.point.collidelistall(obstacles):
+            self.bounce()
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
         # большая погрешность
         dx = self.v * self.cos_phi
@@ -51,13 +53,21 @@ class Bullet(pygame.sprite.Sprite):
         pygame.draw.line(screen, 'orange', (self.point.x, self.point.y),
                          (self.point.x - dx, self.point.y - dy), 5)
 
+    def bounce(self):
+        for block in obstacles:
+            if self.point.colliderect(block):
+                if block.collidepoint((self.point.x + self.v * -self.cos_phi, self.point.y)):
+                    self.sin_phi = -self.sin_phi
+                else:
+                    self.cos_phi = -self.cos_phi
 
-class Gun:
+
+class Weapon:
     def shot(self, v0=30, a=-0.5):
         mx, my = pygame.mouse.get_pos()
         x, y = player.x + player.radius, player.y + player.radius
         phi = atan2(my - y, mx - x)
-        for i in range(-5, 6):
+        for i in range(-10, 11):
             Bullet(x, y, phi + i / 100, v0, a)
 
 
@@ -244,11 +254,12 @@ if __name__ == '__main__':
 
     map = Map()
     player = Player(width // 2, height // 2, 90)
-    gun = Gun()
+    gun = Weapon()
 
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])  # Спиоск всех преград
+
     v = 7
     fps = 60
     clock = pygame.time.Clock()
