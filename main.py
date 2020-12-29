@@ -1,4 +1,6 @@
 import pygame
+from numba import njit, prange
+from numba.typed import List
 from math import cos, sin, atan2, inf, pi
 from collections import deque
 
@@ -32,8 +34,10 @@ class Bullet(pygame.sprite.Sprite):
 
     def update(self):
         # Изменяем полеожение пули и ее скорость
-        if self.v <= 0 or self.point.collidelistall(obstacles):
+        if self.v <= 0:
             self.kill()
+        elif self.point.collidelistall(obstacles):
+            self.bounce()
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
         # большая погрешность
         dx = self.v * self.cos_phi
@@ -47,16 +51,25 @@ class Bullet(pygame.sprite.Sprite):
         pygame.draw.line(screen, 'orange', (self.point.x, self.point.y),
                          (self.point.x - dx, self.point.y - dy), 5)
 
+    def bounce(self):
+        for block in obstacles:
+            if self.point.colliderect(block):
+                if block.collidepoint((self.point.x + self.v * -self.cos_phi, self.point.y)):
+                    self.sin_phi = -self.sin_phi
+                else:
+                    self.cos_phi = -self.cos_phi
 
-class Gun:
-    def shot(self, v0=30, a=-0.1):
+
+class Weapon:
+    def shot(self, v0=40, a=-0.5):
         mx, my = pygame.mouse.get_pos()
         x, y = player.x + player.radius, player.y + player.radius
         phi = atan2(my - y, mx - x)
-        Bullet(x, y, phi, v0, a)
+        for i in range(-10, 11):
+            Bullet(x, y, phi + i / 100, v0, a)
 
 
-class Gamer(pygame.sprite.Sprite):
+class Character(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         self.hp = 100
@@ -84,7 +97,7 @@ class Gamer(pygame.sprite.Sprite):
                 break
 
 
-class Player(Gamer):
+class Player(Character):
     def __init__(self, x, y, fov, radius=10):
         super().__init__()
         self.x = x
@@ -115,36 +128,10 @@ class Player(Gamer):
     def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
-            # Заранее считаем синус и косинус, шоб ресурсы потом не тратить
-            # На 100 делится для точности и птушо в for пихается тока целые числа,
-            # а fov у нас в радианах (радианы если шо от 0 до 6.3, а ля 0 до 360 в градусах)
-            cos_a = cos(view_angle + a / 100)
-            sin_a = sin(view_angle + a / 100)
-            # Задаем rect как точку концов линий рейкаста
-            point = pygame.Rect(x, y, 1, 1)
-
-            # Цикл увеличения дистанции. Чем больше шаг, тем выше произ-ть,
-            # но ниже точность рейкаста
-            step = 15
-            for c in range(0, 1000, step):
-                point.x = x + c * cos_a
-                point.y = y + c * sin_a
-                if point.collidelistall(ray_obstacles):  # Если точка достигает стены
-                    # Тут уже начинается подгон точки под границы ректа бинарным поиском
-                    l, r = c - step, c
-                    while r - l > 1:
-                        m = (r + l) / 2
-                        point.x = x + m * cos_a
-                        point.y = y + m * sin_a
-                        if point.collidelistall(ray_obstacles):
-                            r = m
-                        else:
-                            l = m
-
-                    break
+            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles)
             if a == 0:
-                self.aim_x, self.aim_y = point.x, point.y
-            coords.append((point.x, point.y))
+                self.aim_x, self.aim_y = ray_x, ray_y
+            coords.append((ray_x, ray_y))
         return coords
 
     def start_ray_coords(self, x, y, a):
@@ -183,31 +170,90 @@ class Player(Gamer):
 
 class Map:
     def __init__(self):
-        #  Это карта уровня
-        self.map = [['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', '#', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', '#', ' ', ' ', '#', '#', ' ', '#', '#'],
-                    ['#', ' ', '#', '#', '#', ' ', ' ', '#', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', '#', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#', ' ', '#'],
-                    ['#', ' ', '#', ' ', '#', ' ', ' ', '#', ' ', ' ', ' ', '#'],
-                    ['#', ' ', '#', ' ', '#', ' ', ' ', '#', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', '#', ' ', ' ', '#', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#']]
+        self.create_level()
         self.map_w = len(self.map[0])
         self.map_h = len(self.map)
+        self.cell_w = width // self.map_w
+        self.cell_h = height // self.map_h
 
-        w = width // self.map_w
-        h = height // self.map_h
+        rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
+        self.create_walls(rects)
+
+    def create_level(self):
+        #  Это карта уровня
+        with open(f'levels/level_{level}.txt') as file:
+            self.map = [[row for row in file.readline().rstrip()] for _ in range(12)]
+            print(self.map)
+
+    def create_walls(self, rects):
+        for rect in rects:
+            Wall(rect.x, rect.y, rect.w, rect.h)
+
+    def merge_rects(self, horizontal, vertical):
+        rects = []
+        for h_rect in horizontal:
+            container = []
+            for v_rect in vertical:
+                if h_rect.contains(v_rect):
+                    container.append(v_rect)
+                    vertical.remove(v_rect)
+            if container:
+                rect = h_rect.unionall(container)
+                rects.append(rect)
+        for v_rect in vertical:
+            container = []
+            for h_rect in horizontal:
+                if v_rect.contains(h_rect):
+                    container.append(h_rect)
+                    horizontal.remove(h_rect)
+            if container:
+                rect = v_rect.unionall(container)
+                rects.append(rect)
+
+        return rects
+
+    def get_horizontal_rects(self):
+        rects = []
         for row in range(self.map_h):
+            row_rects = []
+            is_rect = False
             for col in range(self.map_w):
                 if self.map[row][col] == '#':
-                    Wall(col * w, row * h, w, h)
+                    if not is_rect:
+                        row_rects.append([])
+                        is_rect = True
+                    row_rects[-1].append(col)
+                else:
+                    is_rect = False
+            for i in range(len(row_rects)):
+                col, w = row_rects[i][0], len(row_rects[i])
+                row_rects[i] = pygame.Rect(col * self.cell_w, row * self.cell_h,
+                                           w * self.cell_w, self.cell_h)
+            rects.extend(row_rects)
+        return rects
+
+    def get_vertical_rects(self):
+        rects = []
+        for col in range(self.map_w):
+            col_rects = []
+            is_rect = False
+            for row in range(self.map_h):
+                if self.map[row][col] == '#':
+                    if not is_rect:
+                        col_rects.append([])
+                        is_rect = True
+                    col_rects[-1].append(row)
+                else:
+                    is_rect = False
+            for i in range(len(col_rects)):
+                row, h = col_rects[i][0], len(col_rects[i])
+                col_rects[i] = pygame.Rect(col * self.cell_w, row * self.cell_h,
+                                           self.cell_w, h * self.cell_h)
+            rects.extend(col_rects)
+        return rects
 
 
-class Mobs(Gamer):
+class Mobs(Character):
     def __init__(self, x, y, complexity):
         super(Mobs, self).__init__()
         self.x = x
@@ -271,6 +317,23 @@ class Mobs(Gamer):
         self.render()
 
 
+@njit(parallel=True, fastmath=True)
+def calc_cycle(x, y, a, obstacles):
+    ray_x = x
+    ray_y = y
+    cos_a = cos(a)
+    sin_a = sin(a)
+
+    for length in prange(0, 2000):
+        ray_x = x + length * cos_a
+        ray_y = y + length * sin_a
+
+        for ox, oy, w, h in obstacles:
+            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                return ray_x, ray_y
+    return ray_x, ray_y
+
+
 def fps_counter():
     font = pygame.font.Font(None, 20)
     text = font.render(str(round(clock.get_fps(), 4)), True, 'white')
@@ -291,12 +354,16 @@ if __name__ == '__main__':
     enemies = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
 
+    level = 2
     map = Map()
-    gun = Gun()
+    gun = Weapon()
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
-    ray_obstacles = [wall.rect for wall in walls]
+    ray_obstacles = List([(wall.rect.x, wall.rect.y,
+                           wall.rect.w, wall.rect.h) for wall in walls])
     player = Player(width // 2, height // 2, 90)
     mob = Mobs(860, 500, 3)
+
+
     v = 5
     fps = 60
     clock = pygame.time.Clock()
