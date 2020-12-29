@@ -17,6 +17,7 @@ class Wall(pygame.sprite.Sprite):
         self.rect = pygame.Rect(x, y, w, h)
 
     def update(self):
+        # pygame.draw.rect(screen, 'black', (self.x, self.y, self.w, self.h), 1)
         pass
 
 
@@ -168,67 +169,113 @@ class Player(pygame.sprite.Sprite):
 class Map:
     def __init__(self):
         #  Это карта уровня
-        map = [['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-               ['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'], ]
-        map_w = len(map[0])
-        map_h = len(map)
+        self.map = [['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'],
+                    ['#', ' ', '#', '#', '#', ' ', ' ', '#', '#', '#', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
+                    ['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#']]
+        self.map_w = len(self.map[0])
+        self.map_h = len(self.map)
+        self.cell_w = width // self.map_w
+        self.cell_h = height // self.map_h
 
-        w = width // map_w
-        h = height // map_h
-        for row in range(map_h):
-            for col in range(map_w):
-                if map[row][col] == '#':
-                    Wall(col * w, row * h, w, h)
+        rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
+        self.create_walls(rects)
+
+    def create_walls(self, rects):
+        for rect in rects:
+            Wall(rect.x, rect.y, rect.w, rect.h)
+
+    def merge_rects(self, horizontal, vertical):
+        rects = []
+        for h_rect in horizontal:
+            container = []
+            for v_rect in vertical:
+                if h_rect.contains(v_rect):
+                    container.append(v_rect)
+                    vertical.remove(v_rect)
+            if container:
+                rect = h_rect.unionall(container)
+                rects.append(rect)
+        for v_rect in vertical:
+            container = []
+            for h_rect in horizontal:
+                if v_rect.contains(h_rect):
+                    container.append(h_rect)
+                    horizontal.remove(h_rect)
+            if container:
+                rect = v_rect.unionall(container)
+                rects.append(rect)
+
+        return rects
+
+    def get_horizontal_rects(self):
+        rects = []
+        for row in range(self.map_h):
+            row_rects = []
+            is_rect = False
+            for col in range(self.map_w):
+                if self.map[row][col] == '#':
+                    if not is_rect:
+                        row_rects.append([])
+                        is_rect = True
+                    row_rects[-1].append(col)
+                else:
+                    is_rect = False
+            for i in range(len(row_rects)):
+                col, w = row_rects[i][0], len(row_rects[i])
+                row_rects[i] = pygame.Rect(col * self.cell_w, row * self.cell_h,
+                                           w * self.cell_w, self.cell_h)
+            rects.extend(row_rects)
+        return rects
+
+    def get_vertical_rects(self):
+        rects = []
+        for col in range(self.map_w):
+            col_rects = []
+            is_rect = False
+            for row in range(self.map_h):
+                if self.map[row][col] == '#':
+                    if not is_rect:
+                        col_rects.append([])
+                        is_rect = True
+                    col_rects[-1].append(row)
+                else:
+                    is_rect = False
+            for i in range(len(col_rects)):
+                row, h = col_rects[i][0], len(col_rects[i])
+                col_rects[i] = pygame.Rect(col * self.cell_w, row * self.cell_h,
+                                           self.cell_w, h * self.cell_h)
+            rects.extend(col_rects)
+        return rects
 
 
 @njit(parallel=True, fastmath=True)
 def calc_cycle(x, y, a, obstacles):
-    step = 10
     ray_x = x
     ray_y = y
     cos_a = cos(a)
     sin_a = sin(a)
 
-    found = False
     for length in prange(0, 1000):
-        if found:
-            return ray_x, ray_y
-
-        length *= step
         ray_x = x + length * cos_a
         ray_y = y + length * sin_a
 
         for ox, oy, w, h in obstacles:
             if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                l, r = length - step, length
-                while r - l > 1:
-                    left = True
-                    m = (r + l) / 2
-                    ray_x = x + m * cos_a
-                    ray_y = y + m * sin_a
-                    for ox, oy, w, h in obstacles:
-                        if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                            left = False
-                            r = m
-                            break
-                    if left:
-                        l = m
-                found = True
+                return ray_x, ray_y
     return ray_x, ray_y
 
 
@@ -279,6 +326,7 @@ if __name__ == '__main__':
         all_sprites.draw(screen)
         bullets.update()
         player.update()
+        walls.update()
         fps_counter()
 
         pygame.display.flip()
