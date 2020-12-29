@@ -1,7 +1,8 @@
 import pygame
 from numba import njit, prange
 from numba.typed import List
-from math import cos, sin, atan2, pi
+from math import cos, sin, atan2, inf, pi
+from collections import deque
 
 
 class Wall(pygame.sprite.Sprite):
@@ -11,13 +12,9 @@ class Wall(pygame.sprite.Sprite):
         self.y = y
         self.w = w
         self.h = h
-        self.image = pygame.Surface((w, h),
-                                    pygame.SRCALPHA, 32)
-        self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(x, y, w, h)
 
     def update(self):
-        # pygame.draw.rect(screen, 'black', (self.x, self.y, self.w, self.h), 1)
         pass
 
 
@@ -64,7 +61,7 @@ class Bullet(pygame.sprite.Sprite):
 
 
 class Weapon:
-    def shot(self, v0=30, a=-0.5):
+    def shot(self, v0=40, a=-0.5):
         mx, my = pygame.mouse.get_pos()
         x, y = player.x + player.radius, player.y + player.radius
         phi = atan2(my - y, mx - x)
@@ -72,9 +69,37 @@ class Weapon:
             Bullet(x, y, phi + i / 100, v0, a)
 
 
-class Player(pygame.sprite.Sprite):
+class Character(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+        self.hp = 100
+        self.damage = 10
+
+    def movement(self, dx, dy):
+        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
+        # Изменение по x
+        self.rect.x += dx
+        for block in obstacles:
+            if self.rect.colliderect(block):
+                if dx < 0:
+                    self.rect.left = block.right
+                elif dx > 0:
+                    self.rect.right = block.left
+                break
+        # Изменение по y
+        self.rect.y += dy
+        for block in obstacles:
+            if self.rect.colliderect(block):
+                if dy < 0:
+                    self.rect.top = block.bottom
+                elif dy > 0:
+                    self.rect.bottom = block.top
+                break
+
+
+class Player(Character):
     def __init__(self, x, y, fov, radius=10):
-        super().__init__(all_sprites)
+        super().__init__()
         self.x = x
         self.y = y
         self.radius = radius
@@ -123,30 +148,6 @@ class Player(pygame.sprite.Sprite):
             return [(x, y), (width, 0), (width, height),
                     (0, height), (0, 0), (width, 0), (x, y)]
 
-    def movement(self, dx, dy):
-        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
-        # Изменение по x
-        if dx:
-            self.rect.x += dx
-            for block in obstacles:
-                if self.rect.colliderect(block):
-                    if dx < 0:
-                        self.rect.left = block.right
-                    elif dx > 0:
-                        self.rect.right = block.left
-                    break
-
-        # Изменение по y
-        if dy:
-            self.rect.y += dy
-            for block in obstacles:
-                if self.rect.colliderect(block):
-                    if dy < 0:
-                        self.rect.top = block.bottom
-                    elif dy > 0:
-                        self.rect.bottom = block.top
-                    break
-
     def move_character(self):
         # Здесь происходит управление игроком
         keys = pygame.key.get_pressed()
@@ -164,6 +165,7 @@ class Player(pygame.sprite.Sprite):
     def update(self):
         self.move_character()
         self.ray_cast()
+        self.location_on_the_map = (self.x // (width // map.map_w), self.y // (width // map.map_h))
 
 
 class Map:
@@ -262,6 +264,70 @@ class Map:
         return rects
 
 
+class Mobs(Character):
+    def __init__(self, x, y, complexity):
+        super(Mobs, self).__init__()
+        self.x = x
+        self.y = y
+        self.cell_width = width // map.map_w
+        self.cell_height = height // map.map_h
+        self.location_on_the_map = (self.x // self.cell_width,
+                                    self.y // self.cell_height)
+        if complexity == 1:
+            self.radius = 10
+        elif complexity == 2:
+            self.radius = 20
+        elif complexity == 3:
+            self.radius = 30
+        self.image = pygame.Surface((2 * self.radius, 2 * self.radius),
+                                    pygame.SRCALPHA, 32)
+        self.mask = pygame.mask.from_surface(self.image)
+        self.rect = pygame.Rect(self.location_on_the_map[0] * self.cell_width,
+                                self.location_on_the_map[1] * self.cell_height,
+                                2 * self.radius,
+                                2 * self.radius)
+        enemies.add(self)
+        obstacles.append(self.rect)
+        self.render()
+
+    def render(self):
+        for i in range(len(enemies)):
+            pygame.draw.circle(self.image, 'red',
+                               (self.radius, self.radius), self.radius)
+
+    def cell_in_map(self, r, c):
+        return 0 <= r < map.map_h and 0 <= c < map.map_w
+
+    def get_path(self, r1, c1, r2, c2):
+        distance = [[inf] * map.map_w for _ in range(map.map_h)]
+        distance[r1][c1] = 0
+        prev = [[None] * map.map_w for _ in range(map.map_h)]
+        queue = deque()
+        queue.append((r1, c1))
+        while queue:
+            r, c = queue.popleft()
+            for dr in range(-1, 2):
+                for dc in range(-1, 2):
+                    if (dr, dc) != (0, 0):
+                        next_r, next_c = r + dr, c + dc
+                        if (self.cell_in_map(next_r, next_c) and
+                                distance[next_r][next_c] == inf):
+                            distance[next_r][next_c] = distance[r][c] + 1
+                            prev[next_r][next_c] = (r, c)
+                            queue.append((next_r, next_c))
+        if distance[r2][c2] == inf or (r1, c1) == (r2, c2):
+            return [(r1, c1)]
+        path = [(r2, c2)]
+        while prev[r2][c2] != (r1, c1):
+            r2, c2 = prev[r2][c2]
+            path.append((r2, c2))
+        return path
+
+    def update(self):
+        path = self.get_path(*self.location_on_the_map, *player.location_on_the_map)
+        self.render()
+
+
 @njit(parallel=True, fastmath=True)
 def calc_cycle(x, y, a, obstacles):
     ray_x = x
@@ -269,7 +335,7 @@ def calc_cycle(x, y, a, obstacles):
     cos_a = cos(a)
     sin_a = sin(a)
 
-    for length in prange(0, 1000):
+    for length in prange(0, 2000):
         ray_x = x + length * cos_a
         ray_y = y + length * sin_a
 
@@ -292,22 +358,21 @@ if __name__ == '__main__':
     display_info = pygame.display.Info()
     #  Достаются значения разрешения экрана из display_info
     size = width, height = display_info.current_w, display_info.current_h
-    flags = pygame.FULLSCREEN | pygame.HWSURFACE | pygame.DOUBLEBUF
-    screen = pygame.display.set_mode(size, flags=flags)
+    screen = pygame.display.set_mode(size)
 
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
+    enemies = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
 
     map = Map()
-    player = Player(width // 2, height // 2, 90)
     gun = Weapon()
-
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
-                           wall.rect.w, wall.rect.h) for wall in walls])  # Спиоск всех преград
-
-    v = 7
+                           wall.rect.w, wall.rect.h) for wall in walls])
+    player = Player(width // 2, height // 2, 90)
+    mob = Mobs(860, 500, 3)
+    v = 5
     fps = 60
     clock = pygame.time.Clock()
     running = True
@@ -318,16 +383,16 @@ if __name__ == '__main__':
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == pygame.BUTTON_LEFT:
                     player.shoot()
-            if event.type == pygame.KEYDOWN:
+            elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     exit()
-
         screen.fill('white')
         all_sprites.draw(screen)
+        enemies.draw(screen)
         bullets.update()
         player.update()
-        walls.update()
-        fps_counter()
 
+        mob.update()
+        fps_counter()
         pygame.display.flip()
         clock.tick(fps)
