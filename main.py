@@ -15,6 +15,7 @@ class Wall(pygame.sprite.Sprite):
         self.rect = pygame.Rect(x, y, w, h)
 
     def update(self):
+        # pygame.draw.rect(screen, 'black', (self.x, self.y, self.w, self.h), 1)
         pass
 
 
@@ -128,7 +129,8 @@ class Player(Character):
     def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
         for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
-            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles)
+            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles,
+                                      map.cell_w, map.cell_h, map.map_w, map.map_h)
             if a == 0:
                 self.aim_x, self.aim_y = ray_x, ray_y
             coords.append((ray_x, ray_y))
@@ -170,24 +172,7 @@ class Player(Character):
 
 class Map:
     def __init__(self):
-        #  Это карта уровня
-        self.map = [['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#'],
-                    ['#', ' ', '#', '#', '#', ' ', ' ', '#', '#', '#', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', ' ', ' ', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', '#', ' ', '#', '#', ' ', '#', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', '#'],
-                    ['#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#', '#']]
+        self.map = self.create_level()
         self.map_w = len(self.map[0])
         self.map_h = len(self.map)
         self.cell_w = width // self.map_w
@@ -195,6 +180,12 @@ class Map:
 
         rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
         self.create_walls(rects)
+
+    def create_level(self):
+        #  Это карта уровня
+        with open(f'levels/level_{level}.txt') as file:
+            map = file.readlines()
+            return [row.rstrip() for row in map]
 
     def create_walls(self, rects):
         for rect in rects:
@@ -329,20 +320,44 @@ class Mobs(Character):
 
 
 @njit(parallel=True, fastmath=True)
-def calc_cycle(x, y, a, obstacles):
-    ray_x = x
-    ray_y = y
-    cos_a = cos(a)
-    sin_a = sin(a)
+def calc_cycle(player_x, player_y, alpha, obstacles, tile_w, tile_h, w, h):
+    sin_a = sin(alpha) if sin(alpha) else 0.000001
+    cos_a = cos(alpha) if cos(alpha) else 0.000001
+    rounded_x = (player_x // tile_w) * tile_w
+    rounded_y = (player_y // tile_h) * tile_h
 
-    for length in prange(0, 2000):
-        ray_x = x + length * cos_a
-        ray_y = y + length * sin_a
+    # Пересечение по вертикали
+    ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
+    found = False
+    for _ in range(0, rounded_x * tile_w, tile_w):
+        length_v = (ray_x - player_x) / cos_a
+        ray_y = player_y + length_v * sin_a
 
         for ox, oy, w, h in obstacles:
             if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                return ray_x, ray_y
-    return ray_x, ray_y
+                found = True
+                break
+        if found:
+            break
+        ray_x += tile_w * dx
+    res_v = (ray_x, ray_y, length_v)
+
+    # Пересечение по горизонтали
+    ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
+    found = False
+    for _ in range(0, h * tile_h, tile_h):
+        length_h = (ray_y - player_y) / sin_a
+        ray_x = player_x + length_h * cos_a
+
+        for ox, oy, w, h in obstacles:
+            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                found = True
+                break
+        if found:
+            break
+        ray_y += tile_h * dy
+    res_h = (ray_x, ray_y, length_h)
+    return (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
 
 
 def fps_counter():
@@ -365,6 +380,7 @@ if __name__ == '__main__':
     enemies = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
 
+    level = 3
     map = Map()
     gun = Weapon()
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
@@ -372,7 +388,8 @@ if __name__ == '__main__':
                            wall.rect.w, wall.rect.h) for wall in walls])
     player = Player(width // 2, height // 2, 90)
     mob = Mobs(860, 500, 3)
-    v = 5
+
+    v = 8
     fps = 60
     clock = pygame.time.Clock()
     running = True
@@ -387,12 +404,9 @@ if __name__ == '__main__':
                 if event.key == pygame.K_ESCAPE:
                     exit()
         screen.fill('white')
-        all_sprites.draw(screen)
-        enemies.draw(screen)
         bullets.update()
         player.update()
 
-        mob.update()
         fps_counter()
         pygame.display.flip()
         clock.tick(fps)
