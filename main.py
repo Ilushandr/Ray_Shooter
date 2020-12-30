@@ -1,5 +1,5 @@
 import pygame
-from numba import njit, prange
+from numba import njit
 from numba.typed import List
 from math import cos, sin, atan2, inf, pi
 from collections import deque
@@ -279,12 +279,10 @@ class Mobs(Character):
                                 2 * self.radius)
         enemies.add(self)
         obstacles.append(self.rect)
-        self.render()
 
     def render(self):
-        for i in range(len(enemies)):
-            pygame.draw.circle(self.image, 'red',
-                               (self.radius, self.radius), self.radius)
+        pygame.draw.circle(self.image, 'red',
+                           (self.radius, self.radius), self.radius)
 
     def cell_in_map(self, r, c):
         return 0 <= r < map.map_h and 0 <= c < map.map_w
@@ -319,7 +317,7 @@ class Mobs(Character):
         self.render()
 
 
-@njit(parallel=True, fastmath=True)
+@njit(fastmath=True)
 def calc_cycle(player_x, player_y, alpha, obstacles, tile_w, tile_h, w, h):
     sin_a = sin(alpha) if sin(alpha) else 0.000001
     cos_a = cos(alpha) if cos(alpha) else 0.000001
@@ -329,7 +327,7 @@ def calc_cycle(player_x, player_y, alpha, obstacles, tile_w, tile_h, w, h):
     # Пересечение по вертикали
     ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
     found = False
-    for _ in range(0, rounded_x * tile_w, tile_w):
+    for _ in range(0, w * tile_w, tile_w):
         length_v = (ray_x - player_x) / cos_a
         ray_y = player_y + length_v * sin_a
 
@@ -386,11 +384,10 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(width // 2, height // 2, 90)
-    mob = Mobs(860, 500, 3)
+    player = Player(width // 2, height // 2, 70)
 
     v = 8
-    fps = 60
+    fps = 120
     clock = pygame.time.Clock()
     running = True
     while running:
