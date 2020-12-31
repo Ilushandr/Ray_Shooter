@@ -1,5 +1,5 @@
 import pygame
-from numba import njit
+from numba import njit, prange
 from numba.typed import List
 from math import cos, sin, atan2, inf, pi
 from collections import deque
@@ -118,23 +118,12 @@ class Player(Character):
         mx, my = pygame.mouse.get_pos()
         x, y = self.x + self.radius, self.y + self.radius
         view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
-        coords = self.ray_cycle(view_angle, x, y)
-        self.draw_raycast(x, y, coords)
 
-    def draw_raycast(self, x, y, coords):
-        pygame.draw.polygon(screen, 'black', coords)
-        pygame.draw.line(screen, 'red', (x, y),
-                         (self.aim_x, self.aim_y))
-
-    def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
-        for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
-            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles,
-                                      map.cell_w, map.cell_h, map.map_w, map.map_h)
-            if a == 0:
-                self.aim_x, self.aim_y = ray_x, ray_y
-            coords.append((ray_x, ray_y))
-        return coords
+        coords.extend(ray_cycle(x, y, view_angle, ray_obstacles, map.cell_w,
+                                map.cell_h, map.map_w, map.map_h, self.fov))
+
+        pygame.draw.polygon(screen, 'black', coords)
 
     def start_ray_coords(self, x, y, a):
         if -pi <= a <= -pi / 2:
@@ -318,44 +307,51 @@ class Mobs(Character):
 
 
 @njit(fastmath=True)
-def calc_cycle(player_x, player_y, alpha, obstacles, tile_w, tile_h, w, h):
-    sin_a = sin(alpha) if sin(alpha) else 0.000001
-    cos_a = cos(alpha) if cos(alpha) else 0.000001
+def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, w, h, fov):
     rounded_x = (player_x // tile_w) * tile_w
     rounded_y = (player_y // tile_h) * tile_h
+    coords = []
 
-    # Пересечение по вертикали
-    ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
-    found = False
-    for _ in range(0, w * tile_w, tile_w):
-        length_v = (ray_x - player_x) / cos_a
-        ray_y = player_y + length_v * sin_a
+    for alpha in prange(-fov, fov + 1):  # Цикл по углу обзора
+        alpha = view_angle + alpha / 100
+        sin_a = sin(alpha) if sin(alpha) else 0.000001
+        cos_a = cos(alpha) if cos(alpha) else 0.000001
 
-        for ox, oy, w, h in obstacles:
-            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                found = True
+        # Пересечение по вертикали
+        ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
+        found = False
+        for _ in prange(0, w * tile_w, tile_w):
+            length_v = (ray_x - player_x) / cos_a
+            ray_y = player_y + length_v * sin_a
+
+            for ox, oy, w, h in obstacles:
+                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                    found = True
+                    break
+            if found:
                 break
-        if found:
-            break
-        ray_x += tile_w * dx
-    res_v = (ray_x, ray_y, length_v)
+            ray_x += tile_w * dx
+        res_v = (ray_x, ray_y, length_v)
 
-    # Пересечение по горизонтали
-    ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
-    found = False
-    for _ in range(0, h * tile_h, tile_h):
-        length_h = (ray_y - player_y) / sin_a
-        ray_x = player_x + length_h * cos_a
+        # Пересечение по горизонтали
+        ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
+        found = False
+        for _ in prange(0, h * tile_h, tile_h):
+            length_h = (ray_y - player_y) / sin_a
+            ray_x = player_x + length_h * cos_a
 
-        for ox, oy, w, h in obstacles:
-            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                found = True
+            for ox, oy, w, h in obstacles:
+                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                    found = True
+                    break
+            if found:
                 break
-        if found:
-            break
-        ray_y += tile_h * dy
-    res_h = (ray_x, ray_y, length_h)
-    return (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
+            ray_y += tile_h * dy
+        res_h = (ray_x, ray_y, length_h)
+
+        res = (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
+        coords.append(res)
+    return coords
 
 
 def fps_counter():
@@ -384,10 +380,10 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(width // 2, height // 2, 70)
+    player = Player(width // 2, height // 2, 100)
 
     v = 8
-    fps = 120
+    fps = 60
     clock = pygame.time.Clock()
     running = True
     while running:
