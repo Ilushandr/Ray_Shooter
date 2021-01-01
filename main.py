@@ -1,3 +1,4 @@
+from pprint import pprint
 import pygame
 from numba import njit, prange
 from numba.typed import List
@@ -20,9 +21,9 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, phi, v0, a):
+    def __init__(self, player_x, player_y, phi, v0, a):
         super().__init__(bullets)
-        self.point = pygame.Rect(x, y, 1, 1)
+        self.point = pygame.Rect(player_x, player_y, 1, 1)
         self.phi = phi  # Угол полета пули
         self.v = v0  # Скорость полета пули
         self.a = a  # Ускорение пули
@@ -30,8 +31,8 @@ class Bullet(pygame.sprite.Sprite):
         self.cos_phi = cos(phi)
         self.sin_phi = sin(phi)
 
-        self.pos_x = x
-        self.pos_y = y
+        self.pos_x = player_x
+        self.pos_y = player_y
 
     def update(self):
         # Изменяем полеожение пули и ее скорость
@@ -55,10 +56,15 @@ class Bullet(pygame.sprite.Sprite):
     def bounce(self):
         for block in obstacles:
             if self.point.colliderect(block):
-                if block.collidepoint((self.point.x + self.v * -self.cos_phi, self.point.y)):
+                x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
+                y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
+                x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
+                if (block.bottom - 2 <= y <= block.bottom + 2 or
+                        block.top - 2 <= y <= block.top + 2):
                     self.sin_phi = -self.sin_phi
                 else:
                     self.cos_phi = -self.cos_phi
+                break
 
 
 class Weapon:
@@ -162,6 +168,7 @@ class Player(Character):
 class Map:
     def __init__(self):
         self.map = self.create_level()
+
         self.map_w = len(self.map[0])
         self.map_h = len(self.map)
         self.cell_w = width // self.map_w
@@ -171,7 +178,7 @@ class Map:
         self.create_walls(rects)
 
     def create_level(self):
-        #  Это карта уровня
+        # Создает карту уровня
         with open(f'levels/level_{level}.txt') as file:
             map = file.readlines()
             return [row.rstrip() for row in map]
@@ -181,6 +188,7 @@ class Map:
             Wall(rect.x, rect.y, rect.w, rect.h)
 
     def merge_rects(self, horizontal, vertical):
+        # Склеивает переекающиеся стены
         rects = []
         for h_rect in horizontal:
             container = []
@@ -374,13 +382,13 @@ if __name__ == '__main__':
     enemies = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
 
-    level = 3
+    level = 4
     map = Map()
     gun = Weapon()
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(width // 2, height // 2, 100)
+    player = Player(width // 2, height // 2, 80)
 
     v = 8
     fps = 60
@@ -399,7 +407,7 @@ if __name__ == '__main__':
         screen.fill('white')
         bullets.update()
         player.update()
-
+        walls.update()
         fps_counter()
         pygame.display.flip()
         clock.tick(fps)
