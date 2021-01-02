@@ -5,6 +5,44 @@ from math import cos, sin, atan2, inf, pi
 from collections import deque
 
 
+def start_menu():
+    menu_background = pygame.image.load('pictures/menu.jpg')
+
+    font_game = pygame.font.Font(None, 112)
+    start_button = Button(280, 70)
+    quit_button = Button(280, 70)
+
+    show = True
+    while show:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    exit()
+        screen.blit(menu_background, (0, 0))
+        screen.blit(font_game.render('Ray Shooter', True, (200, 10, 10)),
+                    font_game.render('Ray Shooter', True, (200, 10, 10)).get_rect(center=(500, 300)))
+        start_button.draw(270, 600, 'Start')
+        quit_button.draw(270, 700, 'Start')
+        pygame.display.update()
+        clock.tick(60)
+
+
+class Button:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+    def draw(self, x, y, message, action=None):
+        mouse = pygame.mouse.get_pos()
+        click = pygame.mouse.get_pressed()
+
+        pygame.draw.rect(screen, 'red', (x, y, self.width, self.height))
+        if click[0] == 1:
+            show = False
+
+
 class Wall(pygame.sprite.Sprite):
     def __init__(self, x, y, w, h):
         super().__init__(walls)
@@ -363,10 +401,10 @@ if __name__ == '__main__':
     player = Player(width // 2, height // 2, 90)
     mob = Mobs(860, 500, 3)
 
-
     v = 5
     fps = 60
     clock = pygame.time.Clock()
+    start_menu()
     running = True
     while running:
         for event in pygame.event.get():
