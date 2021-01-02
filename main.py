@@ -1,8 +1,35 @@
 import pygame
+import os
+import sys
 from numba import njit, prange
 from numba.typed import List
 from math import cos, sin, atan2, inf, pi
 from collections import deque
+
+
+pygame.init()
+display_info = pygame.display.Info()
+#  Достаются значения разрешения экрана из display_info
+size = width, height = display_info.current_w, display_info.current_h
+screen = pygame.display.set_mode(size)
+
+
+def load_image(name, colorkey=None):
+    fullname = os.path.join('data', name)
+
+    if not os.path.isfile(fullname):
+        print(f"Файл с изображением '{fullname}' не найден")
+        sys.exit()
+    image = pygame.image.load(fullname)
+
+    if colorkey is not None:
+        image = image.convert()
+        if colorkey == -1:
+            colorkey = image.get_at((0, 0))
+        image.set_colorkey(colorkey)
+    else:
+        image = image.convert_alpha()
+    return image
 
 
 def start_menu():
@@ -16,7 +43,7 @@ def start_menu():
     while show:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
+                show = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     exit()
@@ -136,16 +163,20 @@ class Character(pygame.sprite.Sprite):
 
 
 class Player(Character):
+    image = load_image('player.png')
+
     def __init__(self, x, y, fov, radius=10):
         super().__init__()
         self.x = x
         self.y = y
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
-        self.image = pygame.Surface((2 * radius, 2 * radius),
-                                    pygame.SRCALPHA, 32)
+        self.image = Player.image
+        self.rect = self.image.get_rect()
+        # self.image = pygame.Surface((2 * radius, 2 * radius),
+        #                             pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x, self.y, 20, 20)
+        # self.rect = pygame.Rect(self.x, self.y, 20, 20)
         self.aim_x, self.aim_y = x + radius, y + radius
 
     def shoot(self):
@@ -381,12 +412,6 @@ def fps_counter():
 
 
 if __name__ == '__main__':
-    pygame.init()
-    display_info = pygame.display.Info()
-    #  Достаются значения разрешения экрана из display_info
-    size = width, height = display_info.current_w, display_info.current_h
-    screen = pygame.display.set_mode(size)
-
     all_sprites = pygame.sprite.Group()
     walls = pygame.sprite.Group()
     enemies = pygame.sprite.Group()
@@ -399,12 +424,13 @@ if __name__ == '__main__':
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
     player = Player(width // 2, height // 2, 90)
+
     mob = Mobs(860, 500, 3)
 
     v = 5
     fps = 60
     clock = pygame.time.Clock()
-    start_menu()
+    # start_menu()
     running = True
     while running:
         for event in pygame.event.get():
