@@ -1,6 +1,7 @@
 import pygame
 import os
 import sys
+from PIL import Image
 from numba import njit, prange
 from numba.typed import List
 from math import cos, sin, atan2, inf, pi
@@ -13,7 +14,7 @@ size = width, height = display_info.current_w, display_info.current_h
 screen = pygame.display.set_mode(size)
 fps = 60
 clock = pygame.time.Clock()
-level = 2
+level = 1
 all_sprites = pygame.sprite.Group()
 walls = pygame.sprite.Group()
 enemies = pygame.sprite.Group()
@@ -33,12 +34,13 @@ def go_game():
                 if event.key == pygame.K_ESCAPE:
                     start_menu()
         screen.fill('white')
+
         all_sprites.draw(screen)
         enemies.draw(screen)
+
         bullets.update()
         player.update()
 
-        mob.update()
         fps_counter()
         pygame.display.flip()
         clock.tick(fps)
@@ -81,7 +83,8 @@ def start_menu():
                     exit()
         screen.blit(menu_background, (0, 0))
         screen.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
-                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(center=(500, 300)))
+                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(
+                        center=(500, 300)))
         start_button.draw(270, 600, 'Начать игру', go_game)
         quit_button.draw(270, 700, 'Выход', quit)
         pygame.display.update()
@@ -131,10 +134,30 @@ class Wall(pygame.sprite.Sprite):
         pass
 
 
+class Floor(pygame.sprite.Sprite):
+    image = load_image('floor.png')
+
+    def __init__(self):
+        super(Floor, self).__init__(all_sprites)
+        self.image = Floor.image
+        self.result_floor_image = Image.new('RGB', (width, height))
+        self.rect = self.image.get_rect()
+        self.image = self.create_floor()
+
+    def create_floor(self):
+        w = width // self.image.get_width()
+        h = height // self.image.get_height()
+        for row in range(h):
+            for col in range(w):
+                self.result_floor_image.paste(self.image, (col * w, row * h))
+
+        return self.result_floor_image
+
+
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y, phi, v0, a):
+    def __init__(self, player_x, player_y, phi, v0, a):
         super().__init__(bullets)
-        self.point = pygame.Rect(x, y, 1, 1)
+        self.point = pygame.Rect(player_x, player_y, 1, 1)
         self.phi = phi  # Угол полета пули
         self.v = v0  # Скорость полета пули
         self.a = a  # Ускорение пули
@@ -142,8 +165,8 @@ class Bullet(pygame.sprite.Sprite):
         self.cos_phi = cos(phi)
         self.sin_phi = sin(phi)
 
-        self.pos_x = x
-        self.pos_y = y
+        self.pos_x = player_x
+        self.pos_y = player_y
 
     def update(self):
         # Изменяем полеожение пули и ее скорость
@@ -167,10 +190,15 @@ class Bullet(pygame.sprite.Sprite):
     def bounce(self):
         for block in obstacles:
             if self.point.colliderect(block):
-                if block.collidepoint((self.point.x + self.v * -self.cos_phi, self.point.y)):
+                x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
+                y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
+                x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
+                if (block.bottom - 2 <= y <= block.bottom + 2 or
+                        block.top - 2 <= y <= block.top + 2):
                     self.sin_phi = -self.sin_phi
                 else:
                     self.cos_phi = -self.cos_phi
+                break
 
 
 class Weapon:
@@ -211,20 +239,16 @@ class Character(pygame.sprite.Sprite):
 
 
 class Player(Character):
-    image = load_image('player.png')
-
     def __init__(self, x, y, fov, radius=10):
         super().__init__()
         self.x = x
         self.y = y
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
-        self.image = Player.image
-        self.rect = self.image.get_rect()
-        # self.image = pygame.Surface((2 * radius, 2 * radius),
-        #                             pygame.SRCALPHA, 32)
+        self.image = pygame.Surface((2 * radius, 2 * radius),
+                                    pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
-        # self.rect = pygame.Rect(self.x, self.y, 20, 20)
+        self.rect = pygame.Rect(self.x, self.y, 20, 20)
         self.aim_x, self.aim_y = x + radius, y + radius
 
     def shoot(self):
@@ -234,22 +258,12 @@ class Player(Character):
         mx, my = pygame.mouse.get_pos()
         x, y = self.x + self.radius, self.y + self.radius
         view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
-        coords = self.ray_cycle(view_angle, x, y)
-        self.draw_raycast(x, y, coords)
 
-    def draw_raycast(self, x, y, coords):
-        pygame.draw.polygon(screen, 'black', coords)
-        pygame.draw.line(screen, 'red', (x, y),
-                         (self.aim_x, self.aim_y))
-
-    def ray_cycle(self, view_angle, x, y):
         coords = self.start_ray_coords(x, y, view_angle)
-        for a in range(-self.fov, self.fov + 1):  # Цикл по углу обзора
-            ray_x, ray_y = calc_cycle(x, y, view_angle + a / 100, ray_obstacles)
-            if a == 0:
-                self.aim_x, self.aim_y = ray_x, ray_y
-            coords.append((ray_x, ray_y))
-        return coords
+        coords.extend(ray_cycle(x, y, view_angle, ray_obstacles, map.cell_w,
+                                map.cell_h, map.map_w, map.map_h, self.fov))
+
+        pygame.draw.polygon(screen, 'black', coords)
 
     def start_ray_coords(self, x, y, a):
         if -pi <= a <= -pi / 2:
@@ -287,7 +301,8 @@ class Player(Character):
 
 class Map:
     def __init__(self):
-        self.create_level()
+        self.map = self.create_level()
+
         self.map_w = len(self.map[0])
         self.map_h = len(self.map)
         self.cell_w = width // self.map_w
@@ -297,10 +312,10 @@ class Map:
         self.create_walls(rects)
 
     def create_level(self):
-        #  Это карта уровня
+        # Создает карту уровня
         with open(f'levels/level_{level}.txt') as file:
-            self.map = [[row for row in file.readline().rstrip()] for _ in range(12)]
-            print(self.map)
+            map = file.readlines()
+            return [row.rstrip() for row in map]
 
     def create_walls(self, rects):
         for rect in rects:
@@ -434,21 +449,52 @@ class Mobs(Character):
         self.render()
 
 
-@njit(parallel=True, fastmath=True)
-def calc_cycle(x, y, a, obstacles):
-    ray_x = x
-    ray_y = y
-    cos_a = cos(a)
-    sin_a = sin(a)
+@njit(fastmath=True)
+def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, w, h, fov):
+    rounded_x = (player_x // tile_w) * tile_w
+    rounded_y = (player_y // tile_h) * tile_h
+    coords = []
 
-    for length in prange(0, 2000):
-        ray_x = x + length * cos_a
-        ray_y = y + length * sin_a
+    for alpha in prange(-fov, fov + 1):  # Цикл по углу обзора
+        alpha = view_angle + alpha / 100
+        sin_a = sin(alpha) if sin(alpha) else 0.000001
+        cos_a = cos(alpha) if cos(alpha) else 0.000001
 
-        for ox, oy, w, h in obstacles:
-            if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
-                return ray_x, ray_y
-    return ray_x, ray_y
+        # Пересечение по вертикали
+        ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
+        found = False
+        for _ in prange(0, w * tile_w, tile_w):
+            length_v = (ray_x - player_x) / cos_a
+            ray_y = player_y + length_v * sin_a
+
+            for ox, oy, w, h in obstacles:
+                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                    found = True
+                    break
+            if found:
+                break
+            ray_x += tile_w * dx
+        res_v = (ray_x, ray_y, length_v)
+
+        # Пересечение по горизонтали
+        ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
+        found = False
+        for _ in prange(0, h * tile_h, tile_h):
+            length_h = (ray_y - player_y) / sin_a
+            ray_x = player_x + length_h * cos_a
+
+            for ox, oy, w, h in obstacles:
+                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+                    found = True
+                    break
+            if found:
+                break
+            ray_y += tile_h * dy
+        res_h = (ray_x, ray_y, length_h)
+
+        res = (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
+        coords.append(res)
+    return coords
 
 
 def fps_counter():
@@ -461,12 +507,12 @@ def fps_counter():
 
 if __name__ == '__main__':
     map = Map()
+    floor = Floor()
     gun = Weapon()
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
     player = Player(width // 2, height // 2, 90)
 
-    mob = Mobs(860, 500, 3)
     v = 5
     start_menu()
