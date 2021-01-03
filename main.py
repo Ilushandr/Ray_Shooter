@@ -135,7 +135,7 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Floor(pygame.sprite.Sprite):
-    image = Image.open('data/floor.png')
+    image = Image.open('data/floor6.png')
 
     def __init__(self):
         super(Floor, self).__init__(all_sprites)
@@ -147,8 +147,8 @@ class Floor(pygame.sprite.Sprite):
     def create_floor(self):
         w = width // self.image.width
         h = height // self.image.height
-        for row in range(h):
-            for col in range(w):
+        for row in range(h + 5):
+            for col in range(w + 5):
                 self.result_floor_image.paste(self.image, (col * self.image.width, row * self.image.height))
         self.result_floor_image.save('data/floor_result.png')
         self.image = load_image('floor_result.png')
