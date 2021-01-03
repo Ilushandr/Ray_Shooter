@@ -6,12 +6,42 @@ from numba.typed import List
 from math import cos, sin, atan2, inf, pi
 from collections import deque
 
-
 pygame.init()
 display_info = pygame.display.Info()
 #  Достаются значения разрешения экрана из display_info
 size = width, height = display_info.current_w, display_info.current_h
 screen = pygame.display.set_mode(size)
+fps = 60
+clock = pygame.time.Clock()
+level = 2
+all_sprites = pygame.sprite.Group()
+walls = pygame.sprite.Group()
+enemies = pygame.sprite.Group()
+bullets = pygame.sprite.Group()
+
+
+def go_game():
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == pygame.BUTTON_LEFT:
+                    player.shoot()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    start_menu()
+        screen.fill('white')
+        all_sprites.draw(screen)
+        enemies.draw(screen)
+        bullets.update()
+        player.update()
+
+        mob.update()
+        fps_counter()
+        pygame.display.flip()
+        clock.tick(fps)
 
 
 def load_image(name, colorkey=None):
@@ -38,7 +68,9 @@ def start_menu():
     font_game = pygame.font.Font(None, 112)
     start_button = Button(280, 70)
     quit_button = Button(280, 70)
-
+    pygame.mixer.music.load('sounds/background.mp3')
+    pygame.mixer.music.set_volume(0.2)
+    pygame.mixer.music.play(-1)
     show = True
     while show:
         for event in pygame.event.get():
@@ -48,12 +80,19 @@ def start_menu():
                 if event.key == pygame.K_ESCAPE:
                     exit()
         screen.blit(menu_background, (0, 0))
-        screen.blit(font_game.render('Ray Shooter', True, (200, 10, 10)),
-                    font_game.render('Ray Shooter', True, (200, 10, 10)).get_rect(center=(500, 300)))
-        start_button.draw(270, 600, 'Start')
-        quit_button.draw(270, 700, 'Start')
+        screen.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
+                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(center=(500, 300)))
+        start_button.draw(270, 600, 'Начать игру', go_game)
+        quit_button.draw(270, 700, 'Выход', quit)
         pygame.display.update()
         clock.tick(60)
+
+
+def print_text(message, x, y, font_color=(0, 0, 0),
+               font_type=None, font_size=32):
+    font_type = pygame.font.Font(font_type, font_size)
+    text = font_type.render(message, True, font_color)
+    screen.blit(text, (x, y))
 
 
 class Button:
@@ -64,10 +103,19 @@ class Button:
     def draw(self, x, y, message, action=None):
         mouse = pygame.mouse.get_pos()
         click = pygame.mouse.get_pressed()
+        hover_sound = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
+        hover_sound.set_volume(0.1)
 
-        pygame.draw.rect(screen, 'red', (x, y, self.width, self.height))
-        if click[0] == 1:
-            show = False
+        if x < mouse[0] < x + self.width and y < mouse[1] < y + self.height:
+            pygame.draw.rect(screen, (18, 19, 171), (x, y, self.width, self.height))
+            if click[0] == 1:
+                if action is not None:
+                    hover_sound.play()
+                    pygame.mixer.music.stop()
+                    action()
+        else:
+            pygame.draw.rect(screen, (68, 53, 212), (x, y, self.width, self.height))
+        print_text(message, x + 10, y + 10)
 
 
 class Wall(pygame.sprite.Sprite):
@@ -412,12 +460,6 @@ def fps_counter():
 
 
 if __name__ == '__main__':
-    all_sprites = pygame.sprite.Group()
-    walls = pygame.sprite.Group()
-    enemies = pygame.sprite.Group()
-    bullets = pygame.sprite.Group()
-
-    level = 2
     map = Map()
     gun = Weapon()
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
@@ -426,29 +468,5 @@ if __name__ == '__main__':
     player = Player(width // 2, height // 2, 90)
 
     mob = Mobs(860, 500, 3)
-
     v = 5
-    fps = 60
-    clock = pygame.time.Clock()
-    # start_menu()
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == pygame.BUTTON_LEFT:
-                    player.shoot()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    exit()
-        screen.fill('white')
-        all_sprites.draw(screen)
-        enemies.draw(screen)
-        bullets.update()
-        player.update()
-
-        mob.update()
-        fps_counter()
-        pygame.display.flip()
-        clock.tick(fps)
+    start_menu()
