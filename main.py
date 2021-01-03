@@ -34,12 +34,12 @@ def go_game():
                 if event.key == pygame.K_ESCAPE:
                     start_menu()
         screen.fill('white')
-
         all_sprites.draw(screen)
-        enemies.draw(screen)
 
         bullets.update()
         player.update()
+
+        enemies.draw(screen)
 
         fps_counter()
         pygame.display.flip()
@@ -135,23 +135,24 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Floor(pygame.sprite.Sprite):
-    image = load_image('floor.png')
+    image = Image.open('data/floor.png')
 
     def __init__(self):
         super(Floor, self).__init__(all_sprites)
         self.image = Floor.image
         self.result_floor_image = Image.new('RGB', (width, height))
-        self.rect = self.image.get_rect()
         self.image = self.create_floor()
+        self.rect = self.image.get_rect()
 
     def create_floor(self):
-        w = width // self.image.get_width()
-        h = height // self.image.get_height()
+        w = width // self.image.width
+        h = height // self.image.height
         for row in range(h):
             for col in range(w):
-                self.result_floor_image.paste(self.image, (col * w, row * h))
-
-        return self.result_floor_image
+                self.result_floor_image.paste(self.image, (col * self.image.width, row * self.image.height))
+        self.result_floor_image.save('data/floor_result.png')
+        self.image = load_image('floor_result.png')
+        return self.image
 
 
 class Bullet(pygame.sprite.Sprite):
