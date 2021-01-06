@@ -94,13 +94,6 @@ def start_menu():
         clock.tick(60)
 
 
-def print_text(message, x, y, font_color=(0, 0, 0),
-               font_type=None, font_size=32):
-    font_type = pygame.font.Font(font_type, font_size)
-    text = font_type.render(message, True, font_color)
-    screen.blit(text, (x, y))
-
-
 class Button:
     def __init__(self, width, height):
         self.width = width
@@ -121,7 +114,13 @@ class Button:
                     action()
         else:
             pygame.draw.rect(screen, (68, 53, 212), (x, y, self.width, self.height))
-        print_text(message, x + 10, y + 10)
+        self.print_text(message, x + 10, y + 10)
+
+    def print_text(self, message, x, y, font_color=(0, 0, 0),
+                   font_type=None, font_size=32):
+        font_type = pygame.font.Font(font_type, font_size)
+        text = font_type.render(message, True, font_color)
+        screen.blit(text, (x, y))
 
 
 class Wall(pygame.sprite.Sprite):
@@ -161,12 +160,13 @@ class Floor(pygame.sprite.Sprite):
 
 
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, player_x, player_y, phi, v0, a):
+    def __init__(self, player_x, player_y, phi, v0, a, dmg):
         super().__init__(bullets)
         self.point = pygame.Rect(player_x, player_y, 1, 1)
         self.phi = phi  # Угол полета пули
         self.v = v0  # Скорость полета пули
         self.a = a  # Ускорение пули
+        self.dmg = dmg
 
         self.cos_phi = cos(phi)
         self.sin_phi = sin(phi)
@@ -176,10 +176,12 @@ class Bullet(pygame.sprite.Sprite):
 
     def update(self):
         # Изменяем полеожение пули и ее скорость
-        if self.v <= 0 or self.point.collidelistall(enemy_rects):
+        if self.v <= 0:
             self.kill()
         elif self.point.collidelistall(obstacles):
             self.bounce()
+        self.hit()
+
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
         # большая погрешность
         dx = self.v * self.cos_phi
@@ -192,6 +194,13 @@ class Bullet(pygame.sprite.Sprite):
         self.point.y = self.pos_y
         pygame.draw.line(screen, '#FD4A03', (self.point.x, self.point.y),
                          (self.point.x - dx, self.point.y - dy), 5)
+
+    def hit(self):
+        for enemy in enemies:
+            if self.point.colliderect(enemy.rect):
+                self.kill()
+                enemy.hp -= self.dmg
+                enemy.stun()
 
     def bounce(self):
         for block in obstacles:
@@ -209,6 +218,7 @@ class Bullet(pygame.sprite.Sprite):
 
 class Weapon:
     def __init__(self):
+        self.dmg = 5
         self.reload_speed = 1
         self.reload = self.reload_speed
         self.accuracy = 0.05
@@ -217,11 +227,11 @@ class Weapon:
 
     def shot(self):
         mx, my = pygame.mouse.get_pos()
-        x, y = player.x + player.radius, player.y + player.radius
+        x, y = player.x, player.y
         phi = atan2(my - y, mx - x)
         for i in range(-2, 3):
             alpha = randint(-self.accuracy * 100, self.accuracy * 100)
-            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a)
+            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a, self.dmg)
 
 
 class Character(pygame.sprite.Sprite):
@@ -253,17 +263,16 @@ class Character(pygame.sprite.Sprite):
 
 
 class Player(Character):
-    def __init__(self, x, y, fov, radius=10):
+    def __init__(self, fov, radius=10):
         super().__init__()
-        self.x = x
-        self.y = y
+        self.x, self.y = level_map.player_location()
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
 
         self.image = pygame.Surface((2 * radius, 2 * radius),
                                     pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x, self.y,
+        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
                                 self.radius * 2, self.radius * 2)
 
     def shoot(self):
@@ -318,7 +327,7 @@ class Player(Character):
 class Enemy(Character):
     def __init__(self, x, y, complexity):
         super(Enemy, self).__init__()
-        types = [(100, 10, 6), (70, 25, 4), (200, 5, 5)]
+        types = [(100, 10, 7), (70, 25, 4), (200, 5, 5)]
         self.x = x
         self.y = y
         self.location = (self.y // level_map.cell_h, self.x // level_map.cell_w)
@@ -332,24 +341,12 @@ class Enemy(Character):
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(self.x, self.y, self.radius * 2, self.radius * 2)
 
+        self.stun_time = 10
+        self.stun_timer = 0
+
         obstacles.append(self.rect)
         enemy_rects.append(self.rect)
         enemies.add(self)
-
-    def render(self):
-        pygame.draw.circle(screen, 'red',
-                           (self.x, self.y), self.radius)
-
-    def update(self):
-        self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
-        self.destination = level_map.cheapest_path(*self.location)
-        level_map.distances[self.location[0]][self.location[1]] = 1000
-
-        self.move()
-        self.x = self.rect.x + self.radius
-        self.y = self.rect.y + self.radius
-
-        self.render()
 
     def move(self):
         ray_coords = (self.rect.topleft, self.rect.topright,
@@ -362,6 +359,32 @@ class Enemy(Character):
             phi = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
                         x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
         self.movement(cos(phi) * self.speed, sin(phi) * self.speed)
+
+    def stun(self):
+        self.stun_timer = self.stun_time
+
+    def dead(self):
+        obstacles.remove(self.rect)
+        enemy_rects.remove(self.rect)
+        self.kill()
+
+    def render(self):
+        pygame.draw.circle(screen, 'red',
+                           (self.x, self.y), self.radius)
+
+    def update(self):
+        if self.hp <= 0:
+            self.dead()
+        if self.stun_timer <= 0:
+            self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
+            self.destination = level_map.cheapest_path(*self.location)
+            level_map.distances[self.location[0]][self.location[1]] = 1000
+
+            self.move()
+            self.x = self.rect.x + self.radius
+            self.y = self.rect.y + self.radius
+        self.stun_timer -= 1
+        self.render()
 
 
 class Map:
@@ -376,6 +399,13 @@ class Map:
 
         rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
         self.create_walls(rects)
+
+    def player_location(self):
+        for row in range(self.map_h):
+            for col in range(self.map_w):
+                if self.map[row][col] == '@':
+                    return (col * self.cell_w + self.cell_w // 2,
+                            (row) * self.cell_h + self.cell_h // 2)
 
     def create_level(self):
         # Создает карту уровня
@@ -486,6 +516,13 @@ class Map:
         self.distance_to_player()
 
 
+class SpawnPoint:
+    def __init__(self, types=(0, 1, 2), spawn_time=fps * 5):
+        self.types = types
+        self.spawn_time = spawn_time
+        self.timer = self.spawn_time
+
+
 @njit(fastmath=True)
 def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, map_w, map_h, fov):
     rounded_x = (player_x // tile_w) * tile_w
@@ -578,7 +615,7 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(width // 2, height // 2, 80)
+    player = Player(100)
     enemy1 = Enemy(100, 100, 0)
     enemy2 = Enemy(width - 200, height - 200, 0)
     enemy3 = Enemy(200, 200, 0)
