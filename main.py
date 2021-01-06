@@ -15,12 +15,13 @@ size = width, height = display_info.current_w, display_info.current_h
 screen = pygame.display.set_mode(size)
 fps = 60
 clock = pygame.time.Clock()
-level = 3
+level = 4
 
 all_sprites = pygame.sprite.Group()
 walls = pygame.sprite.Group()
 enemies = pygame.sprite.Group()
 bullets = pygame.sprite.Group()
+spawn_points = pygame.sprite.Group()
 
 
 def go_game():
@@ -42,7 +43,7 @@ def go_game():
         level_map.update()
         enemies.update()
         player.update()
-        walls.update()
+        spawn_points.update()
 
         fps_counter()
         pygame.display.flip()
@@ -229,7 +230,7 @@ class Weapon:
         mx, my = pygame.mouse.get_pos()
         x, y = player.x, player.y
         phi = atan2(my - y, mx - x)
-        for i in range(-2, 3):
+        for i in range(-10, 11):
             alpha = randint(-self.accuracy * 100, self.accuracy * 100)
             Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a, self.dmg)
 
@@ -342,7 +343,8 @@ class Enemy(Character):
         self.image = pygame.Surface((self.radius, self.radius),
                                     pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x, self.y, self.radius * 2, self.radius * 2)
+        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
+                                self.radius * 2, self.radius * 2)
 
         self.stun_time = 10
         self.stun_timer = 0
@@ -402,19 +404,21 @@ class Level:
 
         rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
         self.create_walls(rects)
+        self.create_spawn_points()
 
     def player_location(self):
         for row in range(self.map_h):
             for col in range(self.map_w):
                 if self.map[row][col] == '@':
                     return (col * self.cell_w + self.cell_w // 2,
-                            (row) * self.cell_h + self.cell_h // 2)
+                            row * self.cell_h + self.cell_h // 2)
 
     def create_spawn_points(self):
         for row in range(self.map_h):
             for col in range(self.map_w):
-                if self.map[row][col] == 'X':
-                    pass
+                if self.map[row][col] == 'E':
+                    SpawnPoint(col * self.cell_w + self.cell_w // 2,
+                               row * self.cell_h + self.cell_h // 2)
 
     def create_level(self):
         # Создает карту уровня
@@ -525,15 +529,17 @@ class Level:
         self.distance_to_player()
 
 
-class SpawnPoint:
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=fps * 5):
+class SpawnPoint(pygame.sprite.Sprite):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=fps):
+        super().__init__(spawn_points)
         self.x, self.y = x, y
         self.types = types
         self.spawn_time = spawn_time
         self.timer = self.spawn_time
 
     def update(self):
-        if self.timer <= 0:
+        if (self.timer <= 0 and
+                not in_view(self.x, self.y, player.x, player.y, ray_obstacles)):
             Enemy(self.x, self.y, choice(self.types))
             self.timer = self.spawn_time
         self.timer -= 1
@@ -631,10 +637,7 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(100)
-    enemy1 = Enemy(100, 100, 0)
-    enemy2 = Enemy(width - 200, height - 200, 0)
-    enemy3 = Enemy(200, 200, 0)
+    player = Player(90)
 
     v = 10
     start_menu()
