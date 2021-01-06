@@ -6,7 +6,7 @@ from numba import njit
 from numba.typed import List
 from math import cos, sin, atan2, pi, sqrt
 from collections import deque
-from random import randint
+from random import randint, choice
 
 pygame.init()
 display_info = pygame.display.Info()
@@ -268,7 +268,7 @@ class Player(Character):
         self.x, self.y = level_map.player_location()
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
-
+        self.view_angle = self.update_angle()
         self.image = pygame.Surface((2 * radius, 2 * radius),
                                     pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
@@ -280,13 +280,15 @@ class Player(Character):
             gun.shot()
             gun.reload = gun.reload_speed
 
-    def ray_cast(self):
+    def update_angle(self):
         mx, my = pygame.mouse.get_pos()
         x, y = self.x, self.y
         view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
+        return view_angle
 
-        coords = self.start_ray_coords(x, y, view_angle)
-        coords.extend(ray_cycle(x, y, view_angle, ray_obstacles, level_map.cell_w,
+    def ray_cast(self):
+        coords = self.start_ray_coords(self.x, self.y, self.view_angle)
+        coords.extend(ray_cycle(self.x, self.y, self.view_angle, ray_obstacles, level_map.cell_w,
                                 level_map.cell_h, level_map.map_w, level_map.map_h, self.fov))
         pygame.draw.polygon(screen, 'black', coords)
 
@@ -321,6 +323,7 @@ class Player(Character):
     def update(self):
         self.move_character()
         self.ray_cast()
+        self.view_angle = self.update_angle()
         pygame.draw.circle(screen, 'blue', (self.x, self.y), self.radius)
 
 
@@ -387,7 +390,7 @@ class Enemy(Character):
         self.render()
 
 
-class Map:
+class Level:
     def __init__(self):
         self.map = self.create_level()
         self.distances = None
@@ -406,6 +409,12 @@ class Map:
                 if self.map[row][col] == '@':
                     return (col * self.cell_w + self.cell_w // 2,
                             (row) * self.cell_h + self.cell_h // 2)
+
+    def create_spawn_points(self):
+        for row in range(self.map_h):
+            for col in range(self.map_w):
+                if self.map[row][col] == 'X':
+                    pass
 
     def create_level(self):
         # Создает карту уровня
@@ -517,10 +526,17 @@ class Map:
 
 
 class SpawnPoint:
-    def __init__(self, types=(0, 1, 2), spawn_time=fps * 5):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=fps * 5):
+        self.x, self.y = x, y
         self.types = types
         self.spawn_time = spawn_time
         self.timer = self.spawn_time
+
+    def update(self):
+        if self.timer <= 0:
+            Enemy(self.x, self.y, choice(self.types))
+            self.timer = self.spawn_time
+        self.timer -= 1
 
 
 @njit(fastmath=True)
@@ -608,7 +624,7 @@ def fps_counter():
 
 
 if __name__ == '__main__':
-    level_map = Map()
+    level_map = Level()
     floor = Floor()
     gun = Weapon()
     enemy_rects = []
