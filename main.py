@@ -15,7 +15,7 @@ size = width, height = display_info.current_w, display_info.current_h
 screen = pygame.display.set_mode(size)
 fps = 60
 clock = pygame.time.Clock()
-level = 4
+level = 2
 
 all_sprites = pygame.sprite.Group()
 walls = pygame.sprite.Group()
@@ -43,11 +43,23 @@ def go_game():
         level_map.update()
         enemies.update()
         player.update()
+        walls.update()
         spawn_points.update()
 
         fps_counter()
         pygame.display.flip()
         clock.tick(fps)
+
+
+def clear_objects():
+    all_sprites.empty()
+    walls.empty()
+    enemies.empty()
+    bullets.empty()
+    spawn_points.empty()
+    enemy_rects.clear()
+    obstacles.clear()
+    ray_obstacles.clear()
 
 
 def load_image(name, colorkey=None):
@@ -149,6 +161,7 @@ class Floor(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
 
     def create_floor(self):
+        # Склеиает спрайты пола в зависимости от разрешения экрана
         w = width // self.image.width
         h = height // self.image.height
         for row in range(h + 5):
@@ -161,13 +174,14 @@ class Floor(pygame.sprite.Sprite):
 
 
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, player_x, player_y, phi, v0, a, dmg):
+    def __init__(self, player_x, player_y, phi, v0, a, dmg, weight):
         super().__init__(bullets)
         self.point = pygame.Rect(player_x, player_y, 1, 1)
         self.phi = phi  # Угол полета пули
-        self.v = v0  # Скорость полета пули
-        self.a = a  # Ускорение пули
+        self.v = v0
+        self.a = a
         self.dmg = dmg
+        self.weight = weight
 
         self.cos_phi = cos(phi)
         self.sin_phi = sin(phi)
@@ -179,8 +193,8 @@ class Bullet(pygame.sprite.Sprite):
         # Изменяем полеожение пули и ее скорость
         if self.v <= 0:
             self.kill()
-        elif self.point.collidelistall(obstacles):
-            self.bounce()
+        if self.point.collidelistall(obstacles):
+            self.kill()
         self.hit()
 
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
@@ -197,15 +211,17 @@ class Bullet(pygame.sprite.Sprite):
                          (self.point.x - dx, self.point.y - dy), 5)
 
     def hit(self):
+        # Отвечает за удар пули по врагу
         for enemy in enemies:
             if self.point.colliderect(enemy.rect):
-                self.kill()
                 enemy.hp -= self.dmg
-                enemy.stun()
+                enemy.impact(self.weight, self.v * self.cos_phi, self.v * self.sin_phi)
+                self.kill()
 
     def bounce(self):
+        # Рассчитвает рикошет пули
         for block in obstacles:
-            if self.point.colliderect(block):
+            if block not in enemy_rects and self.point.colliderect(block):
                 x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
                 y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
                 x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
@@ -219,31 +235,32 @@ class Bullet(pygame.sprite.Sprite):
 
 class Weapon:
     def __init__(self):
-        self.dmg = 5
-        self.reload_speed = 1
-        self.reload = self.reload_speed
-        self.accuracy = 0.05
-        self.a = -0.5
-        self.v0 = 40
+        self.dmg = 20  # Урон пули
+        self.reload_speed = 1  # Скорость перезарядки
+        self.reload = self.reload_speed  # Таймер для скорости перезарядки
+        self.accuracy = 0.05  # Точность
+        self.a = -0.5  # Ускроение
+        self.v0 = 50  # Начальная скорость
+        self.bullets_weight = 1  # Масса пули
 
     def shot(self):
         mx, my = pygame.mouse.get_pos()
         x, y = player.x, player.y
         phi = atan2(my - y, mx - x)
-        for i in range(-10, 11):
+        for i in range(-2, 3):
             alpha = randint(-self.accuracy * 100, self.accuracy * 100)
-            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a, self.dmg)
+            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a,
+                   self.dmg, self.bullets_weight)
 
 
 class Character(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.hp = 100
-        self.damage = 10
 
     def movement(self, dx, dy):
         # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
         # Изменение по x
+        x, y = self.rect.x, self.rect.y
         self.rect.x += dx
         for block in obstacles:
             if block != self.rect and self.rect.colliderect(block):
@@ -252,6 +269,7 @@ class Character(pygame.sprite.Sprite):
                 elif dx > 0:
                     self.rect.right = block.left
                 break
+
         # Изменение по y
         self.rect.y += dy
         for block in obstacles:
@@ -262,6 +280,20 @@ class Character(pygame.sprite.Sprite):
                     self.rect.bottom = block.top
                 break
 
+        if not in_view(x, y, self.rect.x, self.rect.y, ray_obstacles):
+            self.rect.x, self.rect.y = x, y
+
+    def update_angle(self, x1, y1):
+        x0, y0 = self.x, self.y
+        view_angle = atan2(y1 - y0, x1 - x0)  # Считает угол относительно курсора
+        return view_angle
+
+    def impact(self, bullet_weight, vx1, vy1):
+        # Отталкивает при попадании
+        vx2, vy2 = cos(self.view_angle) * self.speed, sin(self.view_angle) * self.speed
+        self.dx += (bullet_weight * 100 * vx1 + self.weight * vx2) / self.weight
+        self.dy += (bullet_weight * 100 * vy1 + self.weight * vy2) / self.weight
+
 
 class Player(Character):
     def __init__(self, fov, radius=10):
@@ -269,7 +301,7 @@ class Player(Character):
         self.x, self.y = level_map.player_location()
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
-        self.view_angle = self.update_angle()
+        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
         self.image = pygame.Surface((2 * radius, 2 * radius),
                                     pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
@@ -280,12 +312,6 @@ class Player(Character):
         if gun.reload < 0:
             gun.shot()
             gun.reload = gun.reload_speed
-
-    def update_angle(self):
-        mx, my = pygame.mouse.get_pos()
-        x, y = self.x, self.y
-        view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
-        return view_angle
 
     def ray_cast(self):
         coords = self.start_ray_coords(self.x, self.y, self.view_angle)
@@ -324,21 +350,23 @@ class Player(Character):
     def update(self):
         self.move_character()
         self.ray_cast()
-        self.view_angle = self.update_angle()
+        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
         pygame.draw.circle(screen, 'blue', (self.x, self.y), self.radius)
 
 
 class Enemy(Character):
     def __init__(self, x, y, complexity):
         super(Enemy, self).__init__()
-        types = [(100, 10, 7), (70, 25, 4), (200, 5, 5)]
         self.x = x
         self.y = y
         self.location = (self.y // level_map.cell_h, self.x // level_map.cell_w)
-        self.destination = self.location
+        self.destination = self.location  # Точка, в которую нужно идти
 
-        self.hp, self.dmg, self.speed = types[complexity]
+        self.hp, self.dmg, self.speed, self.weight = enemy_types[complexity]
         self.radius = 15
+        self.view_angle = 0
+        self.vx, self.vy = 0, 0
+        self.dx, self.dy = 0, 0
 
         self.image = pygame.Surface((self.radius, self.radius),
                                     pygame.SRCALPHA, 32)
@@ -346,27 +374,37 @@ class Enemy(Character):
         self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
                                 self.radius * 2, self.radius * 2)
 
-        self.stun_time = 10
-        self.stun_timer = 0
-
         obstacles.append(self.rect)
         enemy_rects.append(self.rect)
         enemies.add(self)
 
     def move(self):
+        # Метод ищет следующую точку пути и меняет значения скорости, если попала пуля
         ray_coords = (self.rect.topleft, self.rect.topright,
                       self.rect.bottomright, self.rect.bottomleft)
+        # Проверяет, находится ли игрок в зоне видимости
         if all((in_view(*pos, player.x, player.y, ray_obstacles)
                 for pos in ray_coords)):
-            phi = atan2(player.y - self.y, player.x - self.x)
+            self.view_angle = atan2(player.y - self.y, player.x - self.x)
         else:
             x1, y1 = self.destination
-            phi = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
-                        x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
-        self.movement(cos(phi) * self.speed, sin(phi) * self.speed)
+            self.view_angle = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
+                                    x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
 
-    def stun(self):
-        self.stun_timer = self.stun_time
+        vx0 = cos(self.view_angle) * self.speed
+        vy0 = sin(self.view_angle) * self.speed
+        self.vx = vx0 + self.dx
+        self.vy = vy0 + self.dy
+        self.movement(self.vx, self.vy)
+
+        if self.dx * (vx0 + self.dx) > 0:
+            self.dx += vx0
+        else:
+            self.dx = 0
+        if self.dy * (vy0 + self.dy) > 0:
+            self.dy += vy0
+        else:
+            self.dy = 0
 
     def dead(self):
         obstacles.remove(self.rect)
@@ -380,15 +418,14 @@ class Enemy(Character):
     def update(self):
         if self.hp <= 0:
             self.dead()
-        if self.stun_timer <= 0:
-            self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
-            self.destination = level_map.cheapest_path(*self.location)
-            level_map.distances[self.location[0]][self.location[1]] = 1000
 
-            self.move()
-            self.x = self.rect.x + self.radius
-            self.y = self.rect.y + self.radius
-        self.stun_timer -= 1
+        self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
+        self.destination = level_map.cheapest_path(*self.location)
+        level_map.distances[self.location[0]][self.location[1]] = 1000
+
+        self.move()
+        self.x = self.rect.x + self.radius
+        self.y = self.rect.y + self.radius
         self.render()
 
 
@@ -407,16 +444,20 @@ class Level:
         self.create_spawn_points()
 
     def player_location(self):
+        # Возвращает положение игрока на карте
         for row in range(self.map_h):
             for col in range(self.map_w):
                 if self.map[row][col] == '@':
+                    self.map[row].replace('@', ' ')
                     return (col * self.cell_w + self.cell_w // 2,
                             row * self.cell_h + self.cell_h // 2)
 
     def create_spawn_points(self):
+        # Создает точки спавна мобов на карте
         for row in range(self.map_h):
             for col in range(self.map_w):
                 if self.map[row][col] == 'E':
+                    self.map[row].replace('E', ' ')
                     SpawnPoint(col * self.cell_w + self.cell_w // 2,
                                row * self.cell_h + self.cell_h // 2)
 
@@ -494,6 +535,7 @@ class Level:
         return rects
 
     def distance_to_player(self):
+        # Рассчитывает и возвращает матрицу с расстояниями до игрока на каждой клетке карты
         inf = 1000
         x, y = player.x // self.cell_w, player.y // self.cell_h
         self.distances = [[inf if col != '#' else '#' for col in row]
@@ -517,12 +559,14 @@ class Level:
         return 0 <= row < self.map_h and 0 <= col < self.map_w
 
     def cheapest_path(self, row, col):
-        for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-            next_row, next_col = row + dr, col + dc
-            if ((dr or dc) and self.cell_in_map(next_row, next_col) and
-                    self.distances[next_row][next_col] != '#' and
-                    self.distances[next_row][next_col] < self.distances[row][col]):
-                return next_col, next_row
+        # Возвращает следующую точку, в которую следует идти, чтобы приблизиться к игроку
+        if self.distances[row][col] != '#':
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                next_row, next_col = row + dr, col + dc
+                if ((dr or dc) and self.cell_in_map(next_row, next_col) and
+                        self.distances[next_row][next_col] != '#' and
+                        self.distances[next_row][next_col] < self.distances[row][col]):
+                    return next_col, next_row
         return row, col
 
     def update(self):
@@ -530,12 +574,12 @@ class Level:
 
 
 class SpawnPoint(pygame.sprite.Sprite):
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=fps):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=fps * 2):
         super().__init__(spawn_points)
         self.x, self.y = x, y
-        self.types = types
-        self.spawn_time = spawn_time
-        self.timer = self.spawn_time
+        self.types = types  # Типы врагов
+        self.spawn_time = spawn_time  # Время до появления след врага
+        self.timer = self.spawn_time  # Отсчитывает время поялвения врага
 
     def update(self):
         if (self.timer <= 0 and
@@ -601,6 +645,7 @@ def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, map_w, 
 
 @njit(fastmath=True)
 def in_view(x1, y1, x2, y2, obstacles):
+    # Рейкаст, но с 1-ой линией, для проверки нахождения объекта в зоне видимости
     phi = atan2(y2 - y1, x2 - x1)
     cos_phi = cos(phi)
     sin_phi = sin(phi)
@@ -614,7 +659,7 @@ def in_view(x1, y1, x2, y2, obstacles):
         distance = sqrt((ray_x - x2) ** 2 + (ray_y - y2) ** 2)
 
         for ox, oy, map_w, map_h in obstacles:
-            if ox <= ray_x <= ox + map_w and oy <= ray_y <= oy + map_h:
+            if ox < ray_x < ox + map_w and oy < ray_y < oy + map_h:
                 return False
         length += 1
 
@@ -637,6 +682,7 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls])
+    enemy_types = [(100, 10, 7, 200), (70, 25, 4, 400), (200, 5, 5, 600)]
     player = Player(90)
 
     v = 10
