@@ -2,319 +2,57 @@ import pygame
 import os
 import sys
 from PIL import Image
-from numba import njit, prange
+from numba import njit
 from numba.typed import List
-from math import cos, sin, atan2, inf, pi
+from math import cos, sin, atan2, pi, sqrt, degrees
 from collections import deque
+from random import randint, choice
 
 pygame.init()
 display_info = pygame.display.Info()
-#  Достаются значения разрешения экрана из display_info
-size = width, height = display_info.current_w, display_info.current_h
-screen = pygame.display.set_mode(size)
-fps = 60
-clock = pygame.time.Clock()
-level = 1
-all_sprites = pygame.sprite.Group()
-walls = pygame.sprite.Group()
-enemies = pygame.sprite.Group()
-bullets = pygame.sprite.Group()
+size = WIDTH, HEIGHT = display_info.current_w, display_info.current_h
+SCREEN = pygame.display.set_mode(size)
+FPS = 60
+CLOCK = pygame.time.Clock()
+LEVEL = 4
+ENEMY_TYPES = [(100, 10, 8, 10), (70, 25, 4, 5), (200, 5, 5, 50)]
 
 
-def go_game():
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == pygame.BUTTON_LEFT:
-                    player.shoot()
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    start_menu()
-        screen.fill('white')
-        all_sprites.draw(screen)
-
-        bullets.update()
-        player.update()
-
-        enemies.draw(screen)
-
-        fps_counter()
-        pygame.display.flip()
-        clock.tick(fps)
-
-
-def load_image(name, colorkey=None):
-    fullname = os.path.join('data', name)
-
-    if not os.path.isfile(fullname):
-        print(f"Файл с изображением '{fullname}' не найден")
-        sys.exit()
-    image = pygame.image.load(fullname)
-
-    if colorkey is not None:
-        image = image.convert()
-        if colorkey == -1:
-            colorkey = image.get_at((0, 0))
-        image.set_colorkey(colorkey)
-    else:
-        image = image.convert_alpha()
-    return image
-
-
-def start_menu():
-    menu_background = pygame.image.load('pictures/menu.jpg')
-
-    font_game = pygame.font.Font(None, 112)
-    start_button = Button(280, 70)
-    quit_button = Button(280, 70)
-    pygame.mixer.music.load('sounds/background.mp3')
-    pygame.mixer.music.set_volume(0.2)
-    pygame.mixer.music.play(-1)
-    show = True
-    while show:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                show = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    exit()
-        screen.blit(menu_background, (0, 0))
-        screen.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
-                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(
-                        center=(500, 300)))
-        start_button.draw(270, 600, 'Начать игру', go_game)
-        quit_button.draw(270, 700, 'Выход', quit)
-        pygame.display.update()
-        clock.tick(60)
-
-
-def print_text(message, x, y, font_color=(0, 0, 0),
-               font_type=None, font_size=32):
-    font_type = pygame.font.Font(font_type, font_size)
-    text = font_type.render(message, True, font_color)
-    screen.blit(text, (x, y))
-
-
-class Button:
-    def __init__(self, width, height):
-        self.width = width
-        self.height = height
-
-    def draw(self, x, y, message, action=None):
-        mouse = pygame.mouse.get_pos()
-        click = pygame.mouse.get_pressed()
-        hover_sound = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
-        hover_sound.set_volume(0.1)
-
-        if x < mouse[0] < x + self.width and y < mouse[1] < y + self.height:
-            pygame.draw.rect(screen, (18, 19, 171), (x, y, self.width, self.height))
-            if click[0] == 1:
-                if action is not None:
-                    hover_sound.play()
-                    pygame.mixer.music.stop()
-                    action()
-        else:
-            pygame.draw.rect(screen, (68, 53, 212), (x, y, self.width, self.height))
-        print_text(message, x + 10, y + 10)
-
-
-class Wall(pygame.sprite.Sprite):
-    def __init__(self, x, y, w, h):
-        super().__init__(walls)
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
-        self.rect = pygame.Rect(x, y, w, h)
-
-    def update(self):
-        pass
-
-
-class Floor(pygame.sprite.Sprite):
-    image = Image.open('data/floor6.png')
-
-    def __init__(self):
-        super(Floor, self).__init__(all_sprites)
-        self.image = Floor.image
-        self.result_floor_image = Image.new('RGB', (width, height))
-        self.image = self.create_floor()
-        self.rect = self.image.get_rect()
-
-    def create_floor(self):
-        w = width // self.image.width
-        h = height // self.image.height
-        for row in range(h + 5):
-            for col in range(w + 5):
-                self.result_floor_image.paste(self.image, (col * self.image.width, row * self.image.height))
-        self.result_floor_image.save('data/floor_result.png')
-        self.image = load_image('floor_result.png')
-        return self.image
-
-
-class Bullet(pygame.sprite.Sprite):
-    def __init__(self, player_x, player_y, phi, v0, a):
-        super().__init__(bullets)
-        self.point = pygame.Rect(player_x, player_y, 1, 1)
-        self.phi = phi  # Угол полета пули
-        self.v = v0  # Скорость полета пули
-        self.a = a  # Ускорение пули
-
-        self.cos_phi = cos(phi)
-        self.sin_phi = sin(phi)
-
-        self.pos_x = player_x
-        self.pos_y = player_y
-
-    def update(self):
-        # Изменяем полеожение пули и ее скорость
-        if self.v <= 0:
-            self.kill()
-        elif self.point.collidelistall(obstacles):
-            self.bounce()
-        # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
-        # большая погрешность
-        dx = self.v * self.cos_phi
-        dy = self.v * self.sin_phi
-        self.pos_x = self.pos_x + dx
-        self.pos_y = self.pos_y + dy
-        self.v += self.a
-
-        self.point.x = self.pos_x
-        self.point.y = self.pos_y
-        pygame.draw.line(screen, 'orange', (self.point.x, self.point.y),
-                         (self.point.x - dx, self.point.y - dy), 5)
-
-    def bounce(self):
-        for block in obstacles:
-            if self.point.colliderect(block):
-                x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
-                y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
-                x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
-                if (block.bottom - 2 <= y <= block.bottom + 2 or
-                        block.top - 2 <= y <= block.top + 2):
-                    self.sin_phi = -self.sin_phi
-                else:
-                    self.cos_phi = -self.cos_phi
-                break
-
-
-class Weapon:
-    def shot(self, v0=40, a=-0.5):
-        mx, my = pygame.mouse.get_pos()
-        x, y = player.x + player.radius, player.y + player.radius
-        phi = atan2(my - y, mx - x)
-        for i in range(-10, 11):
-            Bullet(x, y, phi + i / 100, v0, a)
-
-
-class Character(pygame.sprite.Sprite):
-    def __init__(self):
-        super().__init__()
-        self.hp = 100
-        self.damage = 10
-
-    def movement(self, dx, dy):
-        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
-        # Изменение по x
-        self.rect.x += dx
-        for block in obstacles:
-            if self.rect.colliderect(block):
-                if dx < 0:
-                    self.rect.left = block.right
-                elif dx > 0:
-                    self.rect.right = block.left
-                break
-        # Изменение по y
-        self.rect.y += dy
-        for block in obstacles:
-            if self.rect.colliderect(block):
-                if dy < 0:
-                    self.rect.top = block.bottom
-                elif dy > 0:
-                    self.rect.bottom = block.top
-                break
-
-
-class Player(Character):
-    def __init__(self, x, y, fov, radius=10):
-        super().__init__()
-        self.x = x
-        self.y = y
-        self.radius = radius
-        self.fov = fov  # Угол обзора игрока
-        self.image = pygame.Surface((2 * radius, 2 * radius),
-                                    pygame.SRCALPHA, 32)
-        self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x, self.y, 20, 20)
-        self.aim_x, self.aim_y = x + radius, y + radius
-
-    def shoot(self):
-        gun.shot()
-
-    def ray_cast(self):
-        mx, my = pygame.mouse.get_pos()
-        x, y = self.x + self.radius, self.y + self.radius
-        view_angle = atan2(my - y, mx - x)  # Считает угол относительно курсора
-
-        coords = self.start_ray_coords(x, y, view_angle)
-        coords.extend(ray_cycle(x, y, view_angle, ray_obstacles, map.cell_w,
-                                map.cell_h, map.map_w, map.map_h, self.fov))
-
-        pygame.draw.polygon(screen, 'black', coords)
-
-    def start_ray_coords(self, x, y, a):
-        if -pi <= a <= -pi / 2:
-            return [(x, y), (width, height), (0, height), (0, 0),
-                    (width, 0), (width, height), (x, y)]
-        elif -pi / 2 <= a <= 0:
-            return [(x, y), (0, height), (0, 0), (width, 0),
-                    (width, height), (0, height), (x, y)]
-        elif 0 <= a <= pi / 2:
-            return [(x, y), (0, 0), (width, 0), (width, height),
-                    (0, height), (0, 0), (x, y)]
-        else:
-            return [(x, y), (width, 0), (width, height),
-                    (0, height), (0, 0), (width, 0), (x, y)]
-
-    def move_character(self):
-        # Здесь происходит управление игроком
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_w]:
-            self.movement(0, -v)
-        if keys[pygame.K_s]:
-            self.movement(0, v)
-        if keys[pygame.K_a]:
-            self.movement(-v, 0)
-        if keys[pygame.K_d]:
-            self.movement(v, 0)
-        self.x = self.rect.x
-        self.y = self.rect.y
-
-    def update(self):
-        self.move_character()
-        self.ray_cast()
-        self.location_on_the_map = (self.x // (width // map.map_w), self.y // (width // map.map_h))
-
-
-class Map:
+class Level:
     def __init__(self):
         self.map = self.create_level()
+        self.distances = None
 
         self.map_w = len(self.map[0])
         self.map_h = len(self.map)
-        self.cell_w = width // self.map_w
-        self.cell_h = height // self.map_h
+        self.cell_w = WIDTH // self.map_w
+        self.cell_h = HEIGHT // self.map_h
 
         rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
         self.create_walls(rects)
+        self.create_spawn_points()
+
+    def player_location(self):
+        # Возвращает положение игрока на карте
+        for row in range(self.map_h):
+            for col in range(self.map_w):
+                if self.map[row][col] == '@':
+                    self.map[row].replace('@', ' ')
+                    return (col * self.cell_w + self.cell_w // 2,
+                            row * self.cell_h + self.cell_h // 2)
+
+    def create_spawn_points(self):
+        # Создает точки спавна мобов на карте
+        for row in range(self.map_h):
+            for col in range(self.map_w):
+                if self.map[row][col] == 'E':
+                    self.map[row].replace('E', ' ')
+                    SpawnPoint(col * self.cell_w + self.cell_w // 2,
+                               row * self.cell_h + self.cell_h // 2)
 
     def create_level(self):
         # Создает карту уровня
-        with open(f'levels/level_{level}.txt') as file:
+        with open(f'levels/level_{LEVEL}.txt') as file:
             map = file.readlines()
             return [row.rstrip() for row in map]
 
@@ -385,135 +123,572 @@ class Map:
             rects.extend(col_rects)
         return rects
 
+    def distance_to_player(self):
+        # Рассчитывает и возвращает матрицу с расстояниями до игрока на каждой клетке карты
+        inf = 1000
+        x, y = player.x // self.cell_w, player.y // self.cell_h
+        self.distances = [[inf if col != '#' else '#' for col in row]
+                          for row in self.map]
+        self.distances[y][x] = 0
 
-class Mobs(Character):
-    def __init__(self, x, y, complexity):
-        super(Mobs, self).__init__()
-        self.x = x
-        self.y = y
-        self.cell_width = width // map.map_w
-        self.cell_height = height // map.map_h
-        self.location_on_the_map = (self.x // self.cell_width,
-                                    self.y // self.cell_height)
-        if complexity == 1:
-            self.radius = 10
-        elif complexity == 2:
-            self.radius = 20
-        elif complexity == 3:
-            self.radius = 30
-        self.image = pygame.Surface((2 * self.radius, 2 * self.radius),
-                                    pygame.SRCALPHA, 32)
-        self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.location_on_the_map[0] * self.cell_width,
-                                self.location_on_the_map[1] * self.cell_height,
-                                2 * self.radius,
-                                2 * self.radius)
-        enemies.add(self)
-        obstacles.append(self.rect)
-        self.render()
-
-    def render(self):
-        for i in range(len(enemies)):
-            pygame.draw.circle(self.image, 'red',
-                               (self.radius, self.radius), self.radius)
-
-    def cell_in_map(self, r, c):
-        return 0 <= r < map.map_h and 0 <= c < map.map_w
-
-    def get_path(self, r1, c1, r2, c2):
-        distance = [[inf] * map.map_w for _ in range(map.map_h)]
-        distance[r1][c1] = 0
-        prev = [[None] * map.map_w for _ in range(map.map_h)]
         queue = deque()
-        queue.append((r1, c1))
+        queue.append((y, x))
+
         while queue:
-            r, c = queue.popleft()
-            for dr in range(-1, 2):
-                for dc in range(-1, 2):
-                    if (dr, dc) != (0, 0):
-                        next_r, next_c = r + dr, c + dc
-                        if (self.cell_in_map(next_r, next_c) and
-                                distance[next_r][next_c] == inf):
-                            distance[next_r][next_c] = distance[r][c] + 1
-                            prev[next_r][next_c] = (r, c)
-                            queue.append((next_r, next_c))
-        if distance[r2][c2] == inf or (r1, c1) == (r2, c2):
-            return [(r1, c1)]
-        path = [(r2, c2)]
-        while prev[r2][c2] != (r1, c1):
-            r2, c2 = prev[r2][c2]
-            path.append((r2, c2))
-        return path
+            row, col = queue.popleft()
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                if dr or dc:
+                    next_row, next_col = row + dr, col + dc
+                    if (self.cell_in_map(next_row, next_col) and
+                            self.distances[next_row][next_col] == inf):
+                        self.distances[next_row][next_col] = self.distances[row][col] + 1
+                        queue.append((next_row, next_col))
+
+    def cell_in_map(self, row, col):
+        return 0 <= row < self.map_h and 0 <= col < self.map_w
+
+    def cheapest_path(self, row, col):
+        # Возвращает следующую точку, в которую следует идти, чтобы приблизиться к игроку
+        if self.distances[row][col] != '#':
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                next_row, next_col = row + dr, col + dc
+                if ((dr or dc) and self.cell_in_map(next_row, next_col) and
+                        self.distances[next_row][next_col] != '#' and
+                        self.distances[next_row][next_col] < self.distances[row][col]):
+                    return next_col, next_row
+        return row, col
 
     def update(self):
-        path = self.get_path(*self.location_on_the_map, *player.location_on_the_map)
+        self.distance_to_player()
+
+
+class SpawnPoint(pygame.sprite.Sprite):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 2):
+        super().__init__(spawn_points_group)
+        self.x, self.y = x, y
+        self.types = types  # Типы врагов
+        self.spawn_time = spawn_time  # Время до появления след врага
+        self.timer = self.spawn_time  # Отсчитывает время поялвения врага
+
+    def update(self):
+        if (self.timer <= 0 and
+                not in_view(self.x, self.y, player.x, player.y, ray_obstacles)):
+            Enemy(self.x, self.y, choice(self.types))
+            self.timer = self.spawn_time
+        self.timer -= 1
+
+
+class Wall(pygame.sprite.Sprite):
+    def __init__(self, x, y, w, h):
+        super().__init__(walls_group)
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
+        self.rect = pygame.Rect(x, y, w, h)
+
+    def update(self):
+        pygame.draw.rect(SCREEN, 'black', (self.x, self.y,
+                                           self.w, self.h))
+
+
+class Floor(pygame.sprite.Sprite):
+    image = Image.open('data/floor5.png')
+
+    def __init__(self):
+        super(Floor, self).__init__(all_sprites)
+        self.image = Floor.image
+        self.result_floor_image = Image.new('RGB', (WIDTH, HEIGHT))
+        self.image = self.create_floor()
+        self.rect = self.image.get_rect()
+
+    def create_floor(self):
+        # Склеиает спрайты пола в зависимости от разрешения экрана
+        w = WIDTH // self.image.width
+        h = HEIGHT // self.image.height
+        for row in range(h * 5):
+            for col in range(w * 5):
+                self.result_floor_image.paste(self.image,
+                                              (col * self.image.width, row * self.image.height))
+        self.result_floor_image.save('data/floor_result.png')
+        self.image = load_image('floor_result.png')
+        return self.image
+
+
+class Character(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__()
+
+    def movement(self, dx, dy, enemies=True):
+        # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
+        # Изменение по x
+        x, y = self.rect.x, self.rect.y
+        self.rect.x += dx
+        for block in obstacles:
+            if (block != self.rect and self.rect.colliderect(block) and
+                    ((block not in enemy_rects) or
+                     (block in enemy_rects and enemies))):
+                if dx < 0:
+                    self.rect.left = block.right
+                elif dx > 0:
+                    self.rect.right = block.left
+                break
+
+        # Изменение по y
+        self.rect.y += dy
+        for block in obstacles:
+            if (block != self.rect and self.rect.colliderect(block) and
+                    ((block not in enemy_rects) or
+                     (block in enemy_rects and enemies))):
+                if dy < 0:
+                    self.rect.top = block.bottom
+                elif dy > 0:
+                    self.rect.bottom = block.top
+                break
+
+        if not in_view(x, y, self.rect.x, self.rect.y, ray_obstacles):
+            self.rect.x, self.rect.y = x, y
+
+    def update_angle(self, x1, y1):
+        x0, y0 = self.x, self.y
+        view_angle = atan2(y1 - y0, x1 - x0)  # Считает угол относительно курсора
+        return view_angle
+
+    def impact(self, bullet_weight, vx1, vy1):
+        # Отталкивает при попадании
+        vx2, vy2 = cos(self.view_angle) * self.speed, sin(self.view_angle) * self.speed
+        self.dx = (self.weight * vx2 + bullet_weight * vx1) / (self.weight + bullet_weight)
+        self.dy = (self.weight * vy2 + bullet_weight * vy1) / (self.weight + bullet_weight)
+
+
+class Player(Character):
+    def __init__(self, fov, speed, radius=10):
+        super().__init__()
+        self.x, self.y = level_map.player_location()
+        self.v = speed
+        self.radius = radius
+        self.fov = fov  # Угол обзора игрока
+        self.image = pygame.image.load('data/player_3.png').convert_alpha()
+        self.orig_image = self.current_image = self.image
+        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
+        self.mask = pygame.mask.from_surface(self.image)
+        self.rect = self.current_image.get_rect()
+        self.rect.center = (self.x, self.y)
+
+
+    def shoot(self):
+        if gun.reload < 0:
+            gun.shot()
+            gun.reload = gun.reload_speed
+
+    def ray_cast(self):
+        coords = self.start_ray_coords(self.x, self.y, self.view_angle)
+        coords.extend(ray_cycle(self.x, self.y, self.view_angle, ray_obstacles, level_map.cell_w,
+                                level_map.cell_h, level_map.map_w, level_map.map_h, self.fov))
+        pygame.draw.polygon(SCREEN, 'black', coords)
+
+    def start_ray_coords(self, x, y, alpha):
+        if -pi <= alpha <= -pi / 2:
+            return [(x, y), (WIDTH, HEIGHT), (0, HEIGHT), (0, 0),
+                    (WIDTH, 0), (WIDTH, HEIGHT), (x, y)]
+        elif -pi / 2 <= alpha <= 0:
+            return [(x, y), (0, HEIGHT), (0, 0), (WIDTH, 0),
+                    (WIDTH, HEIGHT), (0, HEIGHT), (x, y)]
+        elif 0 <= alpha <= pi / 2:
+            return [(x, y), (0, 0), (WIDTH, 0), (WIDTH, HEIGHT),
+                    (0, HEIGHT), (0, 0), (x, y)]
+        else:
+            return [(x, y), (WIDTH, 0), (WIDTH, HEIGHT),
+                    (0, HEIGHT), (0, 0), (WIDTH, 0), (x, y)]
+
+    def move_character(self):
+        # Здесь происходит управление игроком
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w]:
+            self.movement(0, -self.v, enemies=False)
+        if keys[pygame.K_s]:
+            self.movement(0, self.v, enemies=False)
+        if keys[pygame.K_a]:
+            self.movement(-self.v, 0, enemies=False)
+        if keys[pygame.K_d]:
+            self.movement(self.v, 0, enemies=False)
+        self.x, self.y = self.rect.center
+
+
+    def update(self):
+        self.move_character()
+        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
+        self.ray_cast()
+        self.current_image = pygame.transform.rotate(self.image, -degrees(self.view_angle))
+        SCREEN.blit(self.current_image, self.rect)
+
+
+class Enemy(Character):
+    def __init__(self, x, y, complexity):
+        super(Enemy, self).__init__()
+        self.x = x
+        self.y = y
+        self.location = (self.y // level_map.cell_h, self.x // level_map.cell_w)
+        self.destination = self.location  # Точка, в которую нужно идти
+
+        self.hp, self.dmg, self.speed, self.weight = ENEMY_TYPES[complexity]
+        self.radius = 15
+        self.view_angle = 0
+        self.vx, self.vy = 0, 0
+        self.dx, self.dy = 0, 0
+
+        self.image = pygame.Surface((self.radius, self.radius),
+                                    pygame.SRCALPHA, 32)
+        self.mask = pygame.mask.from_surface(self.image)
+        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
+                                self.radius * 2, self.radius * 2)
+
+        obstacles.append(self.rect)
+        enemy_rects.append(self.rect)
+        enemies_group.add(self)
+
+    def move(self):
+        # Метод ищет следующую точку пути и меняет значения скорости, если попала пуля
+        ray_coords = (self.rect.topleft, self.rect.topright,
+                      self.rect.bottomright, self.rect.bottomleft)
+        # Проверяет, находится ли игрок в зоне видимости
+        if all((in_view(*pos, player.x, player.y, ray_obstacles)
+                for pos in ray_coords)):
+            self.view_angle = atan2(player.y - self.y, player.x - self.x)
+        else:
+            x1, y1 = self.destination
+            self.view_angle = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
+                                    x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
+
+        vx0 = cos(self.view_angle) * self.speed
+        vy0 = sin(self.view_angle) * self.speed
+        self.vx = vx0 + self.dx
+        self.vy = vy0 + self.dy
+        self.movement(self.vx, self.vy)
+
+        if self.dx * (vx0 + self.dx) > 0:
+            self.dx += vx0
+        else:
+            self.dx = 0
+        if self.dy * (vy0 + self.dy) > 0:
+            self.dy += vy0
+        else:
+            self.dy = 0
+
+    def dead(self):
+        obstacles.remove(self.rect)
+        enemy_rects.remove(self.rect)
+        self.kill()
+
+    def render(self):
+        pygame.draw.circle(SCREEN, 'red',
+                           (self.x, self.y), self.radius)
+
+    def update(self):
+        if self.hp <= 0:
+            self.dead()
+
+        self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
+        self.destination = level_map.cheapest_path(*self.location)
+        level_map.distances[self.location[0]][self.location[1]] = 1000
+
+        self.move()
+        self.x = self.rect.x + self.radius
+        self.y = self.rect.y + self.radius
         self.render()
+
+
+class Weapon:
+    def __init__(self):
+        self.dmg = 10  # Урон пули
+        self.reload_speed = 1  # Скорость перезарядки
+        self.reload = self.reload_speed  # Таймер для скорости перезарядки
+        self.accuracy = 0.05  # Точность
+        self.a = -0.5  # Ускроение
+        self.v0 = 50  # Начальная скорость
+        self.bullets_weight = 10  # Масса пули
+
+    def shot(self):
+        mx, my = pygame.mouse.get_pos()
+        x, y = player.x, player.y
+        phi = atan2(my - y, mx - x)
+        for i in range(-2, 3):
+            alpha = randint(-self.accuracy * 100, self.accuracy * 100)
+            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a,
+                   self.dmg, self.bullets_weight)
+
+
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, player_x, player_y, phi, v0, a, dmg, weight):
+        super().__init__(bullets_group)
+        self.point = pygame.Rect(player_x, player_y, 1, 1)
+        self.phi = phi  # Угол полета пули
+        self.v = v0
+        self.a = a
+        self.dmg = dmg
+        self.weight = weight
+
+        self.cos_phi = cos(phi)
+        self.sin_phi = sin(phi)
+
+        self.pos_x = player_x
+        self.pos_y = player_y
+
+    def update(self):
+        # Изменяем полеожение пули и ее скорость
+        if self.v <= 0:
+            self.kill()
+        if self.point.collidelistall(obstacles):
+            self.kill()
+        self.hit()
+
+        # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
+        # большая погрешность
+        dx = self.v * self.cos_phi
+        dy = self.v * self.sin_phi
+        self.pos_x = self.pos_x + dx
+        self.pos_y = self.pos_y + dy
+        self.v += self.a
+
+        self.point.x = self.pos_x
+        self.point.y = self.pos_y
+        pygame.draw.line(SCREEN, '#FD4A03', (self.point.x, self.point.y),
+                         (self.point.x - dx, self.point.y - dy), 5)
+
+    def hit(self):
+        # Отвечает за удар пули по врагу
+        for enemy in enemies_group:
+            if self.point.colliderect(enemy.rect):
+                enemy.hp -= self.dmg
+                enemy.impact(self.weight, self.v * self.cos_phi, self.v * self.sin_phi)
+                self.kill()
+
+    def bounce(self):
+        # Рассчитвает рикошет пули
+        for block in obstacles:
+            if block not in enemy_rects and self.point.colliderect(block):
+                x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
+                y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
+                x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
+                if (block.bottom - 2 <= y <= block.bottom + 2 or
+                        block.top - 2 <= y <= block.top + 2):
+                    self.sin_phi = -self.sin_phi
+                else:
+                    self.cos_phi = -self.cos_phi
+                break
+
+
+class Button:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+    def draw(self, x, y, message, action=None):
+        mouse = pygame.mouse.get_pos()
+        click = pygame.mouse.get_pressed()
+        hover_sound = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
+        hover_sound.set_volume(0.1)
+
+        if x < mouse[0] < x + self.width and y < mouse[1] < y + self.height:
+            pygame.draw.rect(SCREEN, (18, 19, 171), (x, y, self.width, self.height))
+            if click[0] == 1:
+                if action is not None:
+                    hover_sound.play()
+                    pygame.mixer.music.stop()
+                    action()
+        else:
+            pygame.draw.rect(SCREEN, (68, 53, 212), (x, y, self.width, self.height))
+        self.print_text(message, x + 10, y + 10)
+
+    def print_text(self, message, x, y, font_color=(0, 0, 0),
+                   font_type=None, font_size=32):
+        font_type = pygame.font.Font(font_type, font_size)
+        text = font_type.render(message, True, font_color)
+        SCREEN.blit(text, (x, y))
 
 
 @njit(fastmath=True)
-def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, w, h, fov):
+def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, map_w, map_h, fov):
     rounded_x = (player_x // tile_w) * tile_w
     rounded_y = (player_y // tile_h) * tile_h
     coords = []
 
-    for alpha in prange(-fov, fov + 1):  # Цикл по углу обзора
+    for alpha in range(-fov, fov + 1):  # Цикл по углу обзора
         alpha = view_angle + alpha / 100
         sin_a = sin(alpha) if sin(alpha) else 0.000001
         cos_a = cos(alpha) if cos(alpha) else 0.000001
+        ray_x, ray_y = player_x, player_y
 
         # Пересечение по вертикали
         ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
         found = False
-        for _ in prange(0, w * tile_w, tile_w):
+        for _ in range(0, map_w * tile_w, tile_w):
             length_v = (ray_x - player_x) / cos_a
             ray_y = player_y + length_v * sin_a
 
-            for ox, oy, w, h in obstacles:
-                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+            for ox, oy, map_w, map_h in obstacles:
+                if ox <= ray_x <= ox + map_w and oy <= ray_y <= oy + map_h:
                     found = True
                     break
             if found:
                 break
             ray_x += tile_w * dx
-        res_v = (ray_x, ray_y, length_v)
+        res_v = (int(ray_x), int(ray_y), length_v)
 
         # Пересечение по горизонтали
         ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
         found = False
-        for _ in prange(0, h * tile_h, tile_h):
+        for _ in range(0, map_h * tile_h, tile_h):
             length_h = (ray_y - player_y) / sin_a
             ray_x = player_x + length_h * cos_a
 
-            for ox, oy, w, h in obstacles:
-                if ox <= ray_x <= ox + w and oy <= ray_y <= oy + h:
+            for ox, oy, map_w, map_h in obstacles:
+                if ox <= ray_x <= ox + map_w and oy <= ray_y <= oy + map_h:
                     found = True
                     break
             if found:
                 break
             ray_y += tile_h * dy
-        res_h = (ray_x, ray_y, length_h)
+        res_h = (int(ray_x), int(ray_y), length_h)
 
         res = (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
-        coords.append(res)
+
+        if (len(coords) > 1 and (coords[-1][0] == res[0] and coords[-2][0] == res[0] or
+                                 coords[-1][1] == res[1] and coords[-2][1] == res[1])):
+            coords[-1] = res
+        else:
+            coords.append(res)
     return coords
+
+
+@njit(fastmath=True)
+def in_view(x1, y1, x2, y2, obstacles):
+    # Рейкаст, но с 1-ой линией, для проверки нахождения объекта в зоне видимости
+    phi = atan2(y2 - y1, x2 - x1)
+    cos_phi = cos(phi)
+    sin_phi = sin(phi)
+    distance = sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+    length = 0
+    ray_x, ray_y = x1, y1
+    while distance > 1:
+        ray_x = x1 + length * cos_phi
+        ray_y = y1 + length * sin_phi
+        distance = sqrt((ray_x - x2) ** 2 + (ray_y - y2) ** 2)
+
+        for ox, oy, map_w, map_h in obstacles:
+            if ox < ray_x < ox + map_w and oy < ray_y < oy + map_h:
+                return False
+        length += 1
+
+    return True
 
 
 def fps_counter():
     font = pygame.font.Font(None, 20)
-    text = font.render(str(round(clock.get_fps(), 4)), True, 'white')
+    text = font.render(str(round(CLOCK.get_fps(), 4)), True, 'white')
     text_x = 0
     text_y = 0
-    screen.blit(text, (text_x, text_y))
+    SCREEN.blit(text, (text_x, text_y))
+
+
+def go_game():
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    start_menu()
+        if pygame.mouse.get_pressed()[0]:
+            player.shoot()
+
+        all_sprites.draw(SCREEN)
+
+        bullets_group.update()
+        gun.reload -= 1
+        level_map.update()
+        enemies_group.update()
+        player.update()
+        walls_group.update()
+        spawn_points_group.update()
+
+        fps_counter()
+        pygame.display.flip()
+        CLOCK.tick(FPS)
+
+
+def clear_objects():
+    all_sprites.empty()
+    walls_group.empty()
+    enemies_group.empty()
+    bullets_group.empty()
+    spawn_points_group.empty()
+    enemy_rects.clear()
+    obstacles.clear()
+    ray_obstacles.clear()
+
+
+def load_image(name, colorkey=None):
+    fullname = os.path.join('data', name)
+
+    if not os.path.isfile(fullname):
+        print(f"Файл с изображением '{fullname}' не найден")
+        sys.exit()
+    image = pygame.image.load(fullname)
+
+    if colorkey is not None:
+        image = image.convert()
+        if colorkey == -1:
+            colorkey = image.get_at((0, 0))
+        image.set_colorkey(colorkey)
+    else:
+        image = image.convert_alpha()
+    return image
+
+
+def start_menu():
+    menu_background = pygame.image.load('pictures/menu.jpg')
+
+    font_game = pygame.font.Font(None, 112)
+    start_button = Button(280, 70)
+    quit_button = Button(280, 70)
+    pygame.mixer.music.load('sounds/background.mp3')
+    pygame.mixer.music.set_volume(0.2)
+    pygame.mixer.music.play(-1)
+    show = True
+    while show:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                show = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    exit()
+        SCREEN.blit(menu_background, (0, 0))
+        SCREEN.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
+                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(
+                        center=(500, 300)))
+        start_button.draw(270, 600, 'Начать игру', go_game)
+        quit_button.draw(270, 700, 'Выход', quit)
+        pygame.display.update()
+        CLOCK.tick(60)
 
 
 if __name__ == '__main__':
-    map = Map()
+    all_sprites = pygame.sprite.Group()
+    walls_group = pygame.sprite.Group()
+    enemies_group = pygame.sprite.Group()
+    bullets_group = pygame.sprite.Group()
+    spawn_points_group = pygame.sprite.Group()
+
+    level_map = Level()
     floor = Floor()
     gun = Weapon()
-    obstacles = [wall.rect for wall in walls]  # Спиоск всех преград
+    enemy_rects = []
+    obstacles = [wall.rect for wall in walls_group]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
-                           wall.rect.w, wall.rect.h) for wall in walls])
-    player = Player(width // 2, height // 2, 90)
+                           wall.rect.w, wall.rect.h) for wall in walls_group])
+    player = Player(90, 10)
 
-    v = 5
     start_menu()
