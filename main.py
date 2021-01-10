@@ -16,6 +16,8 @@ FPS = 60
 CLOCK = pygame.time.Clock()
 LEVEL = 4
 ENEMY_TYPES = [(100, 10, 8, 10), (70, 25, 4, 5), (200, 5, 5, 50)]
+BULLET_IMAGE = pygame.image.load('data/bullet.png').convert_alpha()
+ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
 
 
 class Level:
@@ -223,7 +225,7 @@ class Character(pygame.sprite.Sprite):
         # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
         # Изменение по x
         x, y = self.rect.x, self.rect.y
-        self.rect.x += dx
+        self.rect.centerx += dx
         for block in obstacles:
             if (block != self.rect and self.rect.colliderect(block) and
                     ((block not in enemy_rects) or
@@ -235,7 +237,7 @@ class Character(pygame.sprite.Sprite):
                 break
 
         # Изменение по y
-        self.rect.y += dy
+        self.rect.centery += dy
         for block in obstacles:
             if (block != self.rect and self.rect.colliderect(block) and
                     ((block not in enemy_rects) or
@@ -269,16 +271,16 @@ class Player(Character):
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
         self.image = pygame.image.load('data/player_3.png').convert_alpha()
-        self.orig_image = self.current_image = self.image
+        self.current_image = self.image
         self.view_angle = self.update_angle(*pygame.mouse.get_pos())
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = self.current_image.get_rect()
         self.rect.center = (self.x, self.y)
 
-
     def shoot(self):
         if gun.reload < 0:
-            gun.shot()
+            gun.shot(self.x + self.image.get_width() / 2 * cos(self.view_angle),
+                     self.y + self.image.get_height() / 2 * sin(self.view_angle))
             gun.reload = gun.reload_speed
 
     def ray_cast(self):
@@ -314,7 +316,6 @@ class Player(Character):
             self.movement(self.v, 0, enemies=False)
         self.x, self.y = self.rect.center
 
-
     def update(self):
         self.move_character()
         self.view_angle = self.update_angle(*pygame.mouse.get_pos())
@@ -332,14 +333,15 @@ class Enemy(Character):
         self.destination = self.location  # Точка, в которую нужно идти
 
         self.hp, self.dmg, self.speed, self.weight = ENEMY_TYPES[complexity]
-        self.radius = 15
+        self.radius = 20
         self.view_angle = 0
         self.vx, self.vy = 0, 0
         self.dx, self.dy = 0, 0
 
-        self.image = pygame.Surface((self.radius, self.radius),
-                                    pygame.SRCALPHA, 32)
+        self.image = ENEMY_IMAGE
+        self.current_image = self.image
         self.mask = pygame.mask.from_surface(self.image)
+
         self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
                                 self.radius * 2, self.radius * 2)
 
@@ -380,9 +382,6 @@ class Enemy(Character):
         enemy_rects.remove(self.rect)
         self.kill()
 
-    def render(self):
-        pygame.draw.circle(SCREEN, 'red',
-                           (self.x, self.y), self.radius)
 
     def update(self):
         if self.hp <= 0:
@@ -395,7 +394,9 @@ class Enemy(Character):
         self.move()
         self.x = self.rect.x + self.radius
         self.y = self.rect.y + self.radius
-        self.render()
+        self.current_image = pygame.transform.rotate(self.image, -degrees(self.view_angle))
+        SCREEN.blit(self.current_image, self.rect)
+
 
 
 class Weapon:
@@ -408,9 +409,11 @@ class Weapon:
         self.v0 = 50  # Начальная скорость
         self.bullets_weight = 10  # Масса пули
 
-    def shot(self):
+    def shot(self, x, y):
+        hover_shoot = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
+        hover_shoot.set_volume(0.05)
+        hover_shoot.play()
         mx, my = pygame.mouse.get_pos()
-        x, y = player.x, player.y
         phi = atan2(my - y, mx - x)
         for i in range(-2, 3):
             alpha = randint(-self.accuracy * 100, self.accuracy * 100)
@@ -422,6 +425,7 @@ class Bullet(pygame.sprite.Sprite):
     def __init__(self, player_x, player_y, phi, v0, a, dmg, weight):
         super().__init__(bullets_group)
         self.point = pygame.Rect(player_x, player_y, 1, 1)
+        self.current_image = BULLET_IMAGE
         self.phi = phi  # Угол полета пули
         self.v = v0
         self.a = a
@@ -452,8 +456,8 @@ class Bullet(pygame.sprite.Sprite):
 
         self.point.x = self.pos_x
         self.point.y = self.pos_y
-        pygame.draw.line(SCREEN, '#FD4A03', (self.point.x, self.point.y),
-                         (self.point.x - dx, self.point.y - dy), 5)
+        self.current_image = pygame.transform.rotate(BULLET_IMAGE, -degrees(player.view_angle))
+        SCREEN.blit(self.current_image, self.point)
 
     def hit(self):
         # Отвечает за удар пули по врагу
