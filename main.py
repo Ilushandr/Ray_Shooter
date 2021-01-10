@@ -4,18 +4,18 @@ import sys
 from PIL import Image
 from numba import njit
 from numba.typed import List
-from math import cos, sin, atan2, pi, sqrt
+from math import cos, sin, atan2, pi, sqrt, degrees
 from collections import deque
-from random import randint, choice
+from random import randint, choice, random
 
 pygame.init()
 display_info = pygame.display.Info()
 size = WIDTH, HEIGHT = display_info.current_w, display_info.current_h
-SCREEN = pygame.display.set_mode(size)
+SCREEN = pygame.display.set_mode(size, flags=pygame.FULLSCREEN)
 FPS = 60
 CLOCK = pygame.time.Clock()
-LEVEL = 4
-ENEMY_TYPES = [(100, 10, 8, 10), (70, 25, 4, 5), (200, 5, 5, 50)]
+LEVEL = 5
+ENEMY_TYPES = [(40, 10, 8, 10), (100, 25, 4, 25), (200, 5, 2, 50)]
 
 
 class Level:
@@ -163,7 +163,7 @@ class Level:
 
 
 class SpawnPoint(pygame.sprite.Sprite):
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 2):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 5):
         super().__init__(spawn_points_group)
         self.x, self.y = x, y
         self.types = types  # Типы врагов
@@ -176,6 +176,66 @@ class SpawnPoint(pygame.sprite.Sprite):
             Enemy(self.x, self.y, choice(self.types))
             self.timer = self.spawn_time
         self.timer -= 1
+
+
+class Drop(pygame.sprite.Sprite):
+    def __init__(self, x, y):
+        super().__init__(drops_group)
+        self.x, self.y = x, y
+        self.rect = pygame.Rect(x, y, 20, 20)
+        self.common_drops = (self.change_damage, self.change_accuracy,
+                             self.change_reload, self.change_multishot,
+                             self.heal)
+        self.rare_drops = (((self.change_damage, 200), (self.change_reload, -50)),
+                           ((self.change_damage, -50), (self.change_reload, 200)),
+                           ((self.change_multishot, 5), (self.change_damage, -50)),
+                           ((self.change_damage, 200), (self.change_accuracy, 110)),
+                           ((self.change_reload, 120), (self.change_accuracy, 70)),
+                           ((self.change_hp, 25),))
+
+    def pick_up(self):
+        if player.rect.colliderect(self.rect):
+            self.get_drop()
+            self.kill()
+
+    def get_drop(self):
+        chance = random()
+        if chance <= 0.2:
+            item = choice(self.rare_drops)
+            print(item)
+            for drop, percent in item:
+                drop(percent)
+        else:
+            drop = choice(self.common_drops)
+            print(drop)
+            drop()
+
+    def change_damage(self, percent=50):
+        if percent < 0 and gun.reload_speed <= 1:
+            return
+        gun.dmg *= 1 + percent / 100
+
+    def change_reload(self, percent=50):
+        if gun.reload_speed > 1:
+            gun.reload_speed *= 0 + percent / 100
+
+    def change_accuracy(self, percent=50):
+        if gun.accuracy * (0 + percent / 100) >= 0.001:
+            gun.accuracy *= 0 + percent / 100
+
+    def change_multishot(self, quantity=1):
+        gun.multishot += quantity
+
+    def change_hp(self, quantity=25):
+        player.max_hp += quantity
+
+    def heal(self, quantity=25):
+        if player.hp < player.max_hp:
+            player.hp += (player.hp + quantity) % player.max_hp
+
+    def update(self):
+        pygame.draw.rect(SCREEN, 'green', self.rect)
+        self.pick_up()
 
 
 class Wall(pygame.sprite.Sprite):
@@ -260,6 +320,27 @@ class Character(pygame.sprite.Sprite):
         self.dx = (self.weight * vx2 + bullet_weight * vx1) / (self.weight + bullet_weight)
         self.dy = (self.weight * vy2 + bullet_weight * vy1) / (self.weight + bullet_weight)
 
+    def change_coords(self):
+        vx0 = cos(self.view_angle) * self.speed
+        vy0 = sin(self.view_angle) * self.speed
+        self.vx = vx0 + self.dx
+        self.vy = vy0 + self.dy
+        self.movement(self.vx, self.vy)
+        if self.dx * (vx0 + self.dx) > 0:
+            self.dx += vx0
+        else:
+            self.dx = 0
+        if self.dy * (vy0 + self.dy) > 0:
+            self.dy += vy0
+        else:
+            self.dy = 0
+
+    def move_rects(self):
+        self.rect = self.current_image.get_rect()
+        self.rect.w, self.rect.h = self.rect.w, self.rect.h
+        self.rect.center = self.x, self.y
+        self.collision_rect.center = self.rect.center
+
 
 class Player(Character):
     def __init__(self, fov, speed, radius=10):
@@ -268,16 +349,23 @@ class Player(Character):
         self.v = speed
         self.radius = radius
         self.fov = fov  # Угол обзора игрока
+        self.max_hp = 10
+        self.hp = self.max_hp
+
+        self.image = pygame.image.load('data/player_3.png').convert_alpha()
+        self.orig_image = self.current_image = self.image
         self.view_angle = self.update_angle(*pygame.mouse.get_pos())
-        self.image = pygame.Surface((2 * radius, 2 * radius),
-                                    pygame.SRCALPHA, 32)
         self.mask = pygame.mask.from_surface(self.image)
-        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
-                                self.radius * 2, self.radius * 2)
+        self.rect = self.current_image.get_rect()
+        self.rect.center = self.x, self.y
+
+        self.collision_rect = pygame.Rect(0, 0, 25, 25)
+        self.collision_rect.center = self.rect.center
 
     def shoot(self):
         if gun.reload < 0:
-            gun.shot()
+            gun.shot(self.x + self.image.get_width() / 2 * cos(self.view_angle),
+                     self.y + self.image.get_height() / 2 * sin(self.view_angle))
             gun.reload = gun.reload_speed
 
     def ray_cast(self):
@@ -311,14 +399,17 @@ class Player(Character):
             self.movement(-self.v, 0, enemies=False)
         if keys[pygame.K_d]:
             self.movement(self.v, 0, enemies=False)
-        self.x = self.rect.x + self.radius
-        self.y = self.rect.y + self.radius
+        self.x, self.y = self.rect.center
 
     def update(self):
+        self.move_rects()
         self.move_character()
-        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
         self.ray_cast()
-        pygame.draw.circle(SCREEN, 'blue', (self.x, self.y), self.radius)
+        self.view_angle = self.update_angle(*pygame.mouse.get_pos())
+        self.current_image = pygame.transform.rotate(self.image, -degrees(self.view_angle))
+        # pygame.draw.rect(SCREEN, 'white', (self.rect.x, self.rect.y,
+        #                                    self.rect.w, self.rect.h))
+        SCREEN.blit(self.current_image, self.rect)
 
 
 class Enemy(Character):
@@ -340,6 +431,8 @@ class Enemy(Character):
         self.mask = pygame.mask.from_surface(self.image)
         self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
                                 self.radius * 2, self.radius * 2)
+        self.collision_rect = pygame.Rect(0, 0, 25, 25)
+        self.collision_rect.center = self.rect.center
 
         obstacles.append(self.rect)
         enemy_rects.append(self.rect)
@@ -358,24 +451,12 @@ class Enemy(Character):
             self.view_angle = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
                                     x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
 
-        vx0 = cos(self.view_angle) * self.speed
-        vy0 = sin(self.view_angle) * self.speed
-        self.vx = vx0 + self.dx
-        self.vy = vy0 + self.dy
-        self.movement(self.vx, self.vy)
-
-        if self.dx * (vx0 + self.dx) > 0:
-            self.dx += vx0
-        else:
-            self.dx = 0
-        if self.dy * (vy0 + self.dy) > 0:
-            self.dy += vy0
-        else:
-            self.dy = 0
-
     def dead(self):
         obstacles.remove(self.rect)
         enemy_rects.remove(self.rect)
+        chance = random()
+        if chance <= 0.3:
+            Drop(self.x, self.y)
         self.kill()
 
     def render(self):
@@ -388,9 +469,9 @@ class Enemy(Character):
 
         self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
         self.destination = level_map.cheapest_path(*self.location)
-        level_map.distances[self.location[0]][self.location[1]] = 1000
 
         self.move()
+        self.change_coords()
         self.x = self.rect.x + self.radius
         self.y = self.rect.y + self.radius
         self.render()
@@ -398,21 +479,21 @@ class Enemy(Character):
 
 class Weapon:
     def __init__(self):
-        self.dmg = 10  # Урон пули
-        self.reload_speed = 1  # Скорость перезарядки
+        self.dmg = 70  # Урон пули
+        self.reload_speed = 20  # Скорость перезарядки
         self.reload = self.reload_speed  # Таймер для скорости перезарядки
-        self.accuracy = 0.05  # Точность
+        self.accuracy = 0.1  # Точность
         self.a = -0.5  # Ускроение
         self.v0 = 50  # Начальная скорость
         self.bullets_weight = 10  # Масса пули
+        self.multishot = 1  # Кол-во пулек за выстрел
 
-    def shot(self):
+    def shot(self, x, y):
         mx, my = pygame.mouse.get_pos()
-        x, y = player.x, player.y
         phi = atan2(my - y, mx - x)
-        for i in range(-2, 3):
-            alpha = randint(-self.accuracy * 100, self.accuracy * 100)
-            Bullet(x, y, phi + alpha / 100 + i / 100, self.v0, self.a,
+        for i in range(-self.multishot // 2, self.multishot // 2):
+            alpha = randint(-int(self.accuracy * 1000), int(self.accuracy * 1000))
+            Bullet(x, y, phi + alpha / 1000 + i / 100, self.v0, self.a,
                    self.dmg, self.bullets_weight)
 
 
@@ -467,6 +548,7 @@ class Bullet(pygame.sprite.Sprite):
             if block not in enemy_rects and self.point.colliderect(block):
                 x0 = self.pos_x - ((self.v - self.a) * self.cos_phi)
                 y0 = self.pos_y - ((self.v - self.a) * self.sin_phi)
+                # Точка пересечения с ректом
                 x, y = block.clipline(x0, y0, self.pos_x, self.pos_y)[0]
                 if (block.bottom - 2 <= y <= block.bottom + 2 or
                         block.top - 2 <= y <= block.top + 2):
@@ -608,9 +690,9 @@ def go_game():
         gun.reload -= 1
         level_map.update()
         enemies_group.update()
-        player.update()
-        walls_group.update()
         spawn_points_group.update()
+        drops_group.update()
+        player.update()
 
         fps_counter()
         pygame.display.flip()
@@ -679,6 +761,7 @@ if __name__ == '__main__':
     enemies_group = pygame.sprite.Group()
     bullets_group = pygame.sprite.Group()
     spawn_points_group = pygame.sprite.Group()
+    drops_group = pygame.sprite.Group()
 
     level_map = Level()
     floor = Floor()
@@ -687,6 +770,5 @@ if __name__ == '__main__':
     obstacles = [wall.rect for wall in walls_group]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls_group])
-    player = Player(90, 10)
-
+    player = Player(100, 10)
     start_menu()
