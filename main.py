@@ -18,6 +18,8 @@ LEVEL = 4
 ENEMY_TYPES = [(40, 10, 8, 10), (100, 25, 4, 25), (200, 5, 2, 50)]
 ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
 BULLET_IMAGE = pygame.image.load('data/bullet.png').convert_alpha()
+HEAL_IMAGE = pygame.image.load('data/heal.png').convert_alpha()
+DROP_BULLET_IMAGE = pygame.image.load('data/drop_bullet.png').convert_alpha()
 PAUSE = False
 
 
@@ -186,15 +188,33 @@ class Drop(pygame.sprite.Sprite):
         super().__init__(drops_group)
         self.x, self.y = x, y
         self.rect = pygame.Rect(x, y, 20, 20)
-        self.common_drops = (self.change_damage, self.change_accuracy,
-                             self.change_reload, self.change_multishot,
-                             self.heal)
-        self.rare_drops = (((self.change_damage, 200), (self.change_reload, -50)),
-                           ((self.change_damage, -50), (self.change_reload, 200)),
-                           ((self.change_multishot, 5), (self.change_damage, -50)),
-                           ((self.change_damage, 200), (self.change_accuracy, 110)),
-                           ((self.change_reload, 120), (self.change_accuracy, 70)),
-                           ((self.change_hp, 25),))
+        self.common = False
+        self.common_drops = ((self.change_damage, 'gun'), (self.change_accuracy, 'gun'),
+                             (self.change_reload, 'gun'), (self.change_multishot, 'gun'),
+                             (self.heal, 'heal'))
+        self.rare_drops = (((self.change_damage, 200, 'gun'), (self.change_reload, -50, 'gun')),
+                           ((self.change_damage, -50, 'gun'), (self.change_reload, 200, 'gun')),
+                           ((self.change_multishot, 5, 'gun'), (self.change_damage, -50, 'gun')),
+                           ((self.change_damage, 200, 'gun'), (self.change_accuracy, 110, 'gun')),
+                           ((self.change_reload, 120, 'gun'), (self.change_accuracy, 70, 'gun')),
+                           ((self.change_hp, 25, 'heal'),))
+        self.drop = self.definition_drop()
+
+    def definition_drop(self):
+        chance = random()
+        if chance <= 0.2:
+            drop = choice(self.rare_drops)
+        else:
+            drop = choice(self.common_drops)
+            self.common = True
+        if drop[-1] == 'heal':
+            self.image = HEAL_IMAGE
+        else:
+            self.image = DROP_BULLET_IMAGE
+        self.rect = self.image.get_rect()
+        self.rect.x = self.x
+        self.rect.y = self.y
+        return drop
 
     def pick_up(self):
         if player.rect.colliderect(self.rect):
@@ -202,16 +222,12 @@ class Drop(pygame.sprite.Sprite):
             self.kill()
 
     def get_drop(self):
-        chance = random()
-        if chance <= 0.2:
-            item = choice(self.rare_drops)
-            print(item)
-            for drop, percent in item:
-                drop(percent)
+        if self.common:
+            self.drop[0]()
+            self.common = False
         else:
-            drop = choice(self.common_drops)
-            print(drop)
-            drop()
+            for drop, percent, flag in self.drop:
+                drop(percent)
 
     def change_damage(self, percent=50):
         if percent < 0 and gun.reload_speed <= 1:
@@ -237,7 +253,7 @@ class Drop(pygame.sprite.Sprite):
             player.hp += (player.hp + quantity) % player.max_hp
 
     def update(self):
-        pygame.draw.rect(SCREEN, 'green', self.rect)
+        SCREEN.blit(self.image, self.rect)
         self.pick_up()
 
 
@@ -256,7 +272,7 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Floor(pygame.sprite.Sprite):
-    image = Image.open('data/floor5.png')
+    image = Image.open(f'data/floor{LEVEL}.png')
 
     def __init__(self):
         super(Floor, self).__init__(all_sprites)
@@ -472,7 +488,7 @@ class Enemy(Character):
         obstacles.remove(self.rect)
         enemy_rects.remove(self.rect)
         chance = random()
-        if chance <= 0.3:
+        if chance <= 10000:
             Drop(self.x, self.y)
         self.kill()
 
@@ -503,6 +519,9 @@ class Weapon:
         self.multishot = 1  # Кол-во пулек за выстрел
 
     def shot(self, x, y):
+        hover_shoot = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
+        hover_shoot.set_volume(0.05)
+        hover_shoot.play()
         mx, my = pygame.mouse.get_pos()
         phi = atan2(my - y, mx - x)
         for i in range(-self.multishot // 2, self.multishot // 2):
@@ -546,7 +565,7 @@ class Bullet(pygame.sprite.Sprite):
 
         self.point.x = self.pos_x
         self.point.y = self.pos_y
-        self.current_image = pygame.transform.rotate(BULLET_IMAGE, -degrees(player.view_angle))
+        self.current_image = pygame.transform.rotate(BULLET_IMAGE, -degrees(self.phi))
         SCREEN.blit(self.current_image, self.point)
 
     def hit(self):
@@ -694,28 +713,27 @@ def go_game():
     pygame.mixer.music.play(-1)
     running = True
     while running:
-        if not PAUSE:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        PAUSE = True
-                if pygame.mouse.get_pressed()[0]:
-                    player.shoot()
-                all_sprites.draw(SCREEN)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    PAUSE = True
+        if pygame.mouse.get_pressed()[0]:
+            player.shoot()
+        all_sprites.draw(SCREEN)
 
-                bullets_group.update()
-                gun.reload -= 1
-                level_map.update()
-                enemies_group.update()
-                spawn_points_group.update()
-                drops_group.update()
-                player.update()
+        bullets_group.update()
+        gun.reload -= 1
+        level_map.update()
+        enemies_group.update()
+        spawn_points_group.update()
+        drops_group.update()
+        player.update()
 
-                fps_counter()
-                pygame.display.flip()
-                CLOCK.tick(FPS)
+        fps_counter()
+        pygame.display.flip()
+        CLOCK.tick(FPS)
 
 
 def clear_objects():
