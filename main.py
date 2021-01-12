@@ -12,15 +12,24 @@ pygame.init()
 display_info = pygame.display.Info()
 size = WIDTH, HEIGHT = display_info.current_w, display_info.current_h
 SCREEN = pygame.display.set_mode(size, flags=pygame.FULLSCREEN)
+
 FPS = 60
 CLOCK = pygame.time.Clock()
-LEVEL = 5
+
+LEVEL = 3
 ENEMY_TYPES = [(40, 10, 8, 10), (100, 25, 4, 25), (200, 5, 2, 50)]
+
 ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
 BULLET_IMAGE = pygame.image.load('data/bullet.png').convert_alpha()
 HEAL_IMAGE = pygame.image.load('data/heal.png').convert_alpha()
 DROP_BULLET_IMAGE = pygame.image.load('data/drop_bullet.png').convert_alpha()
-PAUSE = False
+
+all_sprites = pygame.sprite.Group()
+walls_group = pygame.sprite.Group()
+enemies_group = pygame.sprite.Group()
+bullets_group = pygame.sprite.Group()
+spawn_points_group = pygame.sprite.Group()
+drops_group = pygame.sprite.Group()
 
 
 class Level:
@@ -587,11 +596,12 @@ class Bullet(pygame.sprite.Sprite):
 
 
 class Button:
-    def __init__(self, width, height):
+    def __init__(self, width, height, action=None):
         self.width = width
         self.height = height
+        self.action = action
 
-    def draw(self, x, y, message, action=None):
+    def draw(self, x, y, message):
         mouse = pygame.mouse.get_pos()
         click = pygame.mouse.get_pressed()
         hover_sound = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
@@ -600,13 +610,13 @@ class Button:
         if x < mouse[0] < x + self.width and y < mouse[1] < y + self.height:
             pygame.draw.rect(SCREEN, (18, 19, 171), (x, y, self.width, self.height))
             if click[0] == 1:
-                if action is not None:
+                if self.action:
                     hover_sound.play()
                     pygame.mixer.music.stop()
-                    action()
+                    self.action()
         else:
             pygame.draw.rect(SCREEN, (68, 53, 212), (x, y, self.width, self.height))
-        self.print_text(message, x + 10, y + 10)
+        self.print_text(message, x + 5, y + 5)
 
     def print_text(self, message, x, y, font_color=(0, 0, 0),
                    font_type=None, font_size=32):
@@ -624,10 +634,13 @@ def fps_counter():
 
 
 def go_game():
-    global PAUSE
+    init_globals()
+    exit_button = Button(100, 25, start_menu)
     pygame.mixer.music.load('sounds/background_game.mp3')
     pygame.mixer.music.set_volume(0.1)
     pygame.mixer.music.play(-1)
+
+    pause = False
     running = True
     while running:
         for event in pygame.event.get():
@@ -635,33 +648,33 @@ def go_game():
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    PAUSE = True
-        if pygame.mouse.get_pressed()[0]:
-            player.shoot()
-        all_sprites.draw(SCREEN)
+                    pause = not pause
+        if not pause:
+            if pygame.mouse.get_pressed()[0]:
+                player.shoot()
+            all_sprites.draw(SCREEN)
 
-        bullets_group.update()
-        gun.reload -= 1
-        level_map.update()
-        enemies_group.update()
-        spawn_points_group.update()
-        drops_group.update()
-        player.update()
+            bullets_group.update()
+            gun.reload -= 1
+            level_map.update()
+            enemies_group.update()
+            spawn_points_group.update()
+            drops_group.update()
+            player.update()
 
-        fps_counter()
+            fps_counter()
+
+        exit_button.draw(WIDTH - 120, 10, 'В меню')
         pygame.display.flip()
         CLOCK.tick(FPS)
 
 
-def clear_objects():
+def clear_groups():
     all_sprites.empty()
     walls_group.empty()
     enemies_group.empty()
     bullets_group.empty()
     spawn_points_group.empty()
-    enemy_rects.clear()
-    obstacles.clear()
-    ray_obstacles.clear()
 
 
 def load_image(name, colorkey=None):
@@ -683,11 +696,12 @@ def load_image(name, colorkey=None):
 
 
 def start_menu():
+    clear_groups()
     menu_background = pygame.image.load('pictures/menu.jpg')
 
     font_game = pygame.font.Font(None, 112)
-    start_button = Button(280, 70)
-    quit_button = Button(280, 70)
+    start_button = Button(280, 70, go_game)
+    quit_button = Button(280, 70, quit)
     pygame.mixer.music.load('sounds/background_menu.mp3')
     pygame.mixer.music.set_volume(0.2)
     pygame.mixer.music.play(-1)
@@ -703,30 +717,24 @@ def start_menu():
         SCREEN.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
                     font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(
                         center=(500, 300)))
-        start_button.draw(270, 600, 'Начать игру', go_game)
-        quit_button.draw(270, 700, 'Выход', quit)
+        start_button.draw(270, 600, 'Начать игру')
+        quit_button.draw(270, 700, 'Выход')
         pygame.display.update()
         CLOCK.tick(60)
 
 
-def pause():
-    pass
-
-
-if __name__ == '__main__':
-    all_sprites = pygame.sprite.Group()
-    walls_group = pygame.sprite.Group()
-    enemies_group = pygame.sprite.Group()
-    bullets_group = pygame.sprite.Group()
-    spawn_points_group = pygame.sprite.Group()
-    drops_group = pygame.sprite.Group()
-
+def init_globals():
+    global player, level_map, floor, gun, enemy_rects, obstacles, ray_obstacles
     level_map = Level()
     floor = Floor()
     gun = Weapon()
+    player = Player(100, 10)
     enemy_rects = []
     obstacles = [wall.rect for wall in walls_group]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls_group])
-    player = Player(100, 10)
+
+
+if __name__ == '__main__':
+    init_globals()
     start_menu()
