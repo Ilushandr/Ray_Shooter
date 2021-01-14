@@ -17,7 +17,7 @@ FPS = 60
 CLOCK = pygame.time.Clock()
 
 LEVEL = 3
-ENEMY_TYPES = [(40, 10, 5, 10), (100, 5, 4, 25), (200, 5, 2, 50)]
+ENEMY_TYPES = [(40, 10, 4, 10), (100, 5, 3, 25), (150, 5, 2, 50)]
 
 ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
 BULLET_IMAGE = pygame.image.load('data/bullet.png').convert_alpha()
@@ -180,6 +180,7 @@ class Level:
         if self.score and self.score % 10 == 0 and not self.difficulty_changed:
             self.difficulty_changed = True
             self.difficulty_coeff *= 1.25
+            print(self.difficulty_coeff)
         elif self.score % 10:
             self.difficulty_changed = False
 
@@ -189,15 +190,15 @@ class Level:
 
 
 class SpawnPoint(pygame.sprite.Sprite):
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 5):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 7):
         super().__init__(spawn_points_group)
         self.x, self.y = x, y
         self.types = types  # Типы врагов
         self.spawn_time = spawn_time  # Время до появления след врага
-        self.timer = self.spawn_time  # Отсчитывает время поялвения врага
+        self.timer = 0  # Отсчитывает время поялвения врага
 
     def update_difficulty(self):
-        self.spawn_time = FPS * 5 / level.difficulty_coeff
+        self.spawn_time = FPS * 7 / level.difficulty_coeff
 
     def update(self):
         if (self.timer <= 0 and
@@ -206,7 +207,7 @@ class SpawnPoint(pygame.sprite.Sprite):
             self.timer = self.spawn_time
         self.timer -= 1
         if self.spawn_time > FPS:
-            self.spawn_time = FPS * 5 / level.difficulty_coeff
+            self.spawn_time = FPS * 7 / level.difficulty_coeff
 
 
 class Drop(pygame.sprite.Sprite):
@@ -218,10 +219,10 @@ class Drop(pygame.sprite.Sprite):
         self.common_drops = ((self.change_damage, 'gun'), (self.change_accuracy, 'gun'),
                              (self.change_reload, 'gun'), (self.change_multishot, 'gun'),
                              (self.heal, 'heal'))
-        self.rare_drops = (((self.change_damage, 200, 'gun'), (self.change_reload, -50, 'gun')),
-                           ((self.change_damage, -50, 'gun'), (self.change_reload, 200, 'gun')),
-                           ((self.change_multishot, 5, 'gun'), (self.change_damage, -50, 'gun')),
-                           ((self.change_damage, 200, 'gun'), (self.change_accuracy, 110, 'gun')),
+        self.rare_drops = (((self.change_damage, 200, 'gun'), (self.change_reload, -25, 'gun')),
+                           ((self.change_damage, -50, 'gun'), (self.change_reload, 100, 'gun')),
+                           ((self.change_multishot, 3, 'gun'), (self.change_damage, -50, 'gun')),
+                           ((self.change_damage, 150, 'gun'), (self.change_accuracy, 120, 'gun')),
                            ((self.change_reload, 120, 'gun'), (self.change_accuracy, 70, 'gun')),
                            ((self.change_hp, 25, 'heal'),))
         self.drop = self.definition_drop()
@@ -469,7 +470,6 @@ class Enemy(Character):
 
         self.hp, self.dmg, self.speed, self.weight = ENEMY_TYPES[complexity]
         self.hp = ceil(self.hp * level.difficulty_coeff)
-        self.dmg = ceil(self.dmg * level.difficulty_coeff)
 
         self.view_angle = 0
         self.vx, self.vy = 0, 0
@@ -525,10 +525,9 @@ class Enemy(Character):
         obstacles.remove(self.collision_rect)
         enemy_rects.remove(self.collision_rect)
         chance = random()
-        if chance <= 0.2:
+        if chance <= 0.4:
             Drop(self.x, self.y)
         self.kill()
-        print(level.score)
 
     def update(self):
         if self.hp <= 0:
@@ -549,7 +548,7 @@ class Enemy(Character):
 
 class Weapon:
     def __init__(self):
-        self.dmg = 20  # Урон пули
+        self.dmg = 40  # Урон пули
         self.reload_speed = 20  # Скорость перезарядки
         self.reload = self.reload_speed  # Таймер для скорости перезарядки
         self.accuracy = 0.1  # Точность
@@ -566,7 +565,7 @@ class Weapon:
         phi = atan2(my - y, mx - x)
         for i in range(-self.multishot // 2, self.multishot // 2):
             alpha = randint(-int(self.accuracy * 1000), int(self.accuracy * 1000))
-            Bullet(x, y, phi + alpha / 1000 + i / 100, self.v0, self.a,
+            Bullet(x, y, phi + alpha / 1000 + i * self.accuracy, self.v0, self.a,
                    self.dmg, self.bullets_weight)
 
 
@@ -592,7 +591,7 @@ class Bullet(pygame.sprite.Sprite):
         if self.v <= 0:
             self.kill()
         if self.point.collidelistall(obstacles):
-            self.kill()
+            self.bounce()
         self.hit()
 
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
@@ -627,8 +626,11 @@ class Bullet(pygame.sprite.Sprite):
                 if (block.bottom - 2 <= y <= block.bottom + 2 or
                         block.top - 2 <= y <= block.top + 2):
                     self.sin_phi = -self.sin_phi
+                    self.phi = -self.phi
                 else:
+                    self.phi = pi - self.phi
                     self.cos_phi = -self.cos_phi
+                self.v -= 5
                 break
 
 
@@ -649,7 +651,13 @@ class InterFace(Widget):
         self.print_text(f'{player.hp} / {player.max_hp}', 20, HEIGHT - height - 5,
                         font_color='white')
 
+    def score_bar(self):
+        x = WIDTH // 2 - (len(str(level.score)) + 7) // 2 * 16
+        y = HEIGHT - HEIGHT // 40 - 5
+        self.print_text(f'SCORE: {level.score}', x, y, font_color='white')
+
     def update(self):
+        self.score_bar()
         self.hp_bar()
 
 
@@ -715,9 +723,10 @@ def go_game():
             player.update()
 
             fps_counter()
+        else:
+            exit_button.draw(WIDTH - 120, 10, 'В меню')
 
         interface.update()
-        exit_button.draw(WIDTH - 120, 10, 'В меню')
 
         pygame.display.flip()
         CLOCK.tick(FPS)
