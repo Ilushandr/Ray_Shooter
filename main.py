@@ -203,9 +203,10 @@ class SpawnPoint(pygame.sprite.Sprite):
         if (self.timer <= 0 and
                 not in_view(self.x, self.y, player.x, player.y, ray_obstacles)):
             Enemy(self.x, self.y, choice(self.types))
-            self.spawn_time = FPS * 5 / level.difficulty_coeff
             self.timer = self.spawn_time
         self.timer -= 1
+        if self.spawn_time > FPS:
+            self.spawn_time = FPS * 5 / level.difficulty_coeff
 
 
 class Drop(pygame.sprite.Sprite):
