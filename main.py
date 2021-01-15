@@ -2,25 +2,34 @@ import pygame
 import os
 import sys
 from PIL import Image
-from numba import njit
 from numba.typed import List
-from math import cos, sin, atan2, pi, sqrt, degrees
+from math import cos, sin, atan2, pi, degrees, ceil
 from collections import deque
 from random import randint, choice, random
+from RayCasting import ray_cycle, in_view
 
 pygame.init()
 display_info = pygame.display.Info()
 size = WIDTH, HEIGHT = display_info.current_w, display_info.current_h
 SCREEN = pygame.display.set_mode(size, flags=pygame.FULLSCREEN)
+
 FPS = 60
 CLOCK = pygame.time.Clock()
-LEVEL = 4
-ENEMY_TYPES = [(40, 10, 8, 10), (100, 25, 4, 25), (200, 5, 2, 50)]
+
+LEVEL = 3
+ENEMY_TYPES = [(40, 10, 4, 10), (100, 5, 3, 25), (150, 5, 2, 50)]
+
 ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
 BULLET_IMAGE = pygame.image.load('data/bullet.png').convert_alpha()
 HEAL_IMAGE = pygame.image.load('data/heal.png').convert_alpha()
 DROP_BULLET_IMAGE = pygame.image.load('data/drop_bullet.png').convert_alpha()
-PAUSE = False
+
+all_sprites = pygame.sprite.Group()
+walls_group = pygame.sprite.Group()
+enemies_group = pygame.sprite.Group()
+bullets_group = pygame.sprite.Group()
+spawn_points_group = pygame.sprite.Group()
+drops_group = pygame.sprite.Group()
 
 
 class Level:
@@ -33,9 +42,13 @@ class Level:
         self.cell_w = WIDTH // self.map_w
         self.cell_h = HEIGHT // self.map_h
 
+        self.difficulty_coeff = 1
+        self.difficulty_changed = False
         rects = self.merge_rects(self.get_horizontal_rects(), self.get_vertical_rects())
         self.create_walls(rects)
         self.create_spawn_points()
+
+        self.score = 0
 
     def player_location(self):
         # Возвращает положение игрока на карте
@@ -163,17 +176,29 @@ class Level:
                     return next_col, next_row
         return row, col
 
+    def update_difficulty(self):
+        if self.score and self.score % 10 == 0 and not self.difficulty_changed:
+            self.difficulty_changed = True
+            self.difficulty_coeff *= 1.25
+            print(self.difficulty_coeff)
+        elif self.score % 10:
+            self.difficulty_changed = False
+
     def update(self):
+        self.update_difficulty()
         self.distance_to_player()
 
 
 class SpawnPoint(pygame.sprite.Sprite):
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 5):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 7):
         super().__init__(spawn_points_group)
         self.x, self.y = x, y
         self.types = types  # Типы врагов
         self.spawn_time = spawn_time  # Время до появления след врага
-        self.timer = self.spawn_time  # Отсчитывает время поялвения врага
+        self.timer = 0  # Отсчитывает время поялвения врага
+
+    def update_difficulty(self):
+        self.spawn_time = FPS * 7 / level.difficulty_coeff
 
     def update(self):
         if (self.timer <= 0 and
@@ -181,6 +206,8 @@ class SpawnPoint(pygame.sprite.Sprite):
             Enemy(self.x, self.y, choice(self.types))
             self.timer = self.spawn_time
         self.timer -= 1
+        if self.spawn_time > FPS:
+            self.spawn_time = FPS * 7 / level.difficulty_coeff
 
 
 class Drop(pygame.sprite.Sprite):
@@ -192,10 +219,10 @@ class Drop(pygame.sprite.Sprite):
         self.common_drops = ((self.change_damage, 'gun'), (self.change_accuracy, 'gun'),
                              (self.change_reload, 'gun'), (self.change_multishot, 'gun'),
                              (self.heal, 'heal'))
-        self.rare_drops = (((self.change_damage, 200, 'gun'), (self.change_reload, -50, 'gun')),
-                           ((self.change_damage, -50, 'gun'), (self.change_reload, 200, 'gun')),
-                           ((self.change_multishot, 5, 'gun'), (self.change_damage, -50, 'gun')),
-                           ((self.change_damage, 200, 'gun'), (self.change_accuracy, 110, 'gun')),
+        self.rare_drops = (((self.change_damage, 200, 'gun'), (self.change_reload, -25, 'gun')),
+                           ((self.change_damage, -50, 'gun'), (self.change_reload, 100, 'gun')),
+                           ((self.change_multishot, 3, 'gun'), (self.change_damage, -50, 'gun')),
+                           ((self.change_damage, 150, 'gun'), (self.change_accuracy, 120, 'gun')),
                            ((self.change_reload, 120, 'gun'), (self.change_accuracy, 70, 'gun')),
                            ((self.change_hp, 25, 'heal'),))
         self.drop = self.definition_drop()
@@ -249,8 +276,10 @@ class Drop(pygame.sprite.Sprite):
         player.max_hp += quantity
 
     def heal(self, quantity=25):
-        if player.hp < player.max_hp:
-            player.hp += (player.hp + quantity) % player.max_hp
+        if player.hp + quantity <= player.max_hp:
+            player.hp = player.hp + quantity
+        else:
+            player.hp = player.max_hp
 
     def update(self):
         SCREEN.blit(self.image, self.rect)
@@ -272,7 +301,7 @@ class Wall(pygame.sprite.Sprite):
 
 
 class Floor(pygame.sprite.Sprite):
-    image = Image.open(f'data/floor{LEVEL}.png')
+    image = Image.open(f'data/floor{randint(1, 6)}.png')
 
     def __init__(self):
         super(Floor, self).__init__(all_sprites)
@@ -282,7 +311,7 @@ class Floor(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
 
     def create_floor(self):
-        # Склеиает спрайты пола в зависимости от разрешения экрана
+        # Склеивает спрайты пола в зависимости от разрешения экрана
         w = WIDTH // self.image.width
         h = HEIGHT // self.image.height
         for row in range(h * 5):
@@ -297,36 +326,37 @@ class Floor(pygame.sprite.Sprite):
 class Character(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
+        self.collision_rect = pygame.Rect(0, 0, 25, 25)
 
     def movement(self, dx, dy, enemies=True):
         # Метод обрабатывает столкновение игрока с препятствиями и меняет его координаты
         # Изменение по x
-        x, y = self.rect.x, self.rect.y
-        self.rect.x += dx
+        x, y = self.collision_rect.x, self.collision_rect.y
+        self.collision_rect.x += dx
         for block in obstacles:
-            if (block != self.rect and self.rect.colliderect(block) and
+            if (block != self.collision_rect and self.collision_rect.colliderect(block) and
                     ((block not in enemy_rects) or
                      (block in enemy_rects and enemies))):
                 if dx < 0:
-                    self.rect.left = block.right
+                    self.collision_rect.left = block.right
                 elif dx > 0:
-                    self.rect.right = block.left
+                    self.collision_rect.right = block.left
                 break
 
         # Изменение по y
-        self.rect.y += dy
+        self.collision_rect.y += dy
         for block in obstacles:
-            if (block != self.rect and self.rect.colliderect(block) and
+            if (block != self.collision_rect and self.collision_rect.colliderect(block) and
                     ((block not in enemy_rects) or
                      (block in enemy_rects and enemies))):
                 if dy < 0:
-                    self.rect.top = block.bottom
+                    self.collision_rect.top = block.bottom
                 elif dy > 0:
-                    self.rect.bottom = block.top
+                    self.collision_rect.bottom = block.top
                 break
 
-        if not in_view(x, y, self.rect.x, self.rect.y, ray_obstacles):
-            self.rect.x, self.rect.y = x, y
+        if not in_view(x, y, self.collision_rect.x, self.collision_rect.y, ray_obstacles):
+            self.collision_rect.x, self.collision_rect.y = x, y
 
     def update_angle(self, x1, y1):
         x0, y0 = self.x, self.y
@@ -344,6 +374,7 @@ class Character(pygame.sprite.Sprite):
         vy0 = sin(self.view_angle) * self.speed
         self.vx = vx0 + self.dx
         self.vy = vy0 + self.dy
+
         self.movement(self.vx, self.vy)
         if self.dx * (vx0 + self.dx) > 0:
             self.dx += vx0
@@ -354,44 +385,56 @@ class Character(pygame.sprite.Sprite):
         else:
             self.dy = 0
 
-    def move_rects(self):
-        self.rect = self.current_image.get_rect()
-        self.rect.w, self.rect.h = self.rect.w, self.rect.h
-        self.rect.center = self.x, self.y
-        self.collision_rect.center = self.rect.center
-
 
 class Player(Character):
-    def __init__(self, fov, speed, radius=10):
+    def __init__(self, fov, speed):
         super().__init__()
-        self.x, self.y = level_map.player_location()
+        self.x, self.y = level.player_location()
         self.v = speed
-        self.radius = radius
         self.fov = fov  # Угол обзора игрока
-        self.max_hp = 10
+        self.max_hp = 100
         self.hp = self.max_hp
 
-        self.image = pygame.image.load('data/player_3.png').convert_alpha()
-        self.orig_image = self.current_image = self.image
+        self.image = pygame.image.load('data/player.png').convert_alpha()
+        self.current_image = self.image
         self.view_angle = self.update_angle(*pygame.mouse.get_pos())
-        self.mask = pygame.mask.from_surface(self.image)
         self.rect = self.current_image.get_rect()
         self.rect.center = self.x, self.y
-
-        self.collision_rect = pygame.Rect(0, 0, 25, 25)
         self.collision_rect.center = self.rect.center
+        self.immortality_timer = 45
+
+    def death(self):
+        if self.hp <= 0:
+            pass
+
+    def move_character(self):
+        # Здесь происходит управление игроком
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w]:
+            self.movement(0, -self.v, enemies=False)
+        if keys[pygame.K_s]:
+            self.movement(0, self.v, enemies=False)
+        if keys[pygame.K_a]:
+            self.movement(-self.v, 0, enemies=False)
+        if keys[pygame.K_d]:
+            self.movement(self.v, 0, enemies=False)
+        self.x, self.y = self.collision_rect.center
+        self.rect.center = self.x, self.y
+
+    def ray_cast(self):
+        coords = self.start_ray_coords(self.x, self.y, self.view_angle)
+        coords.extend(ray_cycle(self.x, self.y, self.view_angle, ray_obstacles, level.cell_w,
+                                level.cell_h, level.map_w, level.map_h, self.fov))
+        pygame.draw.polygon(SCREEN, 'black', coords)
+
+    def set_immortal(self):
+        self.immortality_timer = 60
 
     def shoot(self):
         if gun.reload < 0:
             gun.shot(self.x + self.image.get_width() / 2 * cos(self.view_angle),
                      self.y + self.image.get_height() / 2 * sin(self.view_angle))
             gun.reload = gun.reload_speed
-
-    def ray_cast(self):
-        coords = self.start_ray_coords(self.x, self.y, self.view_angle)
-        coords.extend(ray_cycle(self.x, self.y, self.view_angle, ray_obstacles, level_map.cell_w,
-                                level_map.cell_h, level_map.map_w, level_map.map_h, self.fov))
-        pygame.draw.polygon(SCREEN, 'black', coords)
 
     def start_ray_coords(self, x, y, alpha):
         if -pi <= alpha <= -pi / 2:
@@ -407,27 +450,13 @@ class Player(Character):
             return [(x, y), (WIDTH, 0), (WIDTH, HEIGHT),
                     (0, HEIGHT), (0, 0), (WIDTH, 0), (x, y)]
 
-    def move_character(self):
-        # Здесь происходит управление игроком
-        keys = pygame.key.get_pressed()
-        if keys[pygame.K_w]:
-            self.movement(0, -self.v, enemies=False)
-        if keys[pygame.K_s]:
-            self.movement(0, self.v, enemies=False)
-        if keys[pygame.K_a]:
-            self.movement(-self.v, 0, enemies=False)
-        if keys[pygame.K_d]:
-            self.movement(self.v, 0, enemies=False)
-        self.x, self.y = self.rect.center
-
     def update(self):
-        self.move_rects()
+        self.immortality_timer -= 1
         self.move_character()
         self.ray_cast()
         self.view_angle = self.update_angle(*pygame.mouse.get_pos())
         self.current_image = pygame.transform.rotate(self.image, -degrees(self.view_angle))
-        # pygame.draw.rect(SCREEN, 'white', (self.rect.x, self.rect.y,
-        #                                    self.rect.w, self.rect.h))
+        # pygame.draw.rect(SCREEN, 'white', self.collision_rect)
         SCREEN.blit(self.current_image, self.rect)
 
 
@@ -436,38 +465,45 @@ class Enemy(Character):
         super(Enemy, self).__init__()
         self.x = x
         self.y = y
-        self.location = (self.y // level_map.cell_h, self.x // level_map.cell_w)
+        self.location = (self.y // level.cell_h, self.x // level.cell_w)
         self.destination = self.location  # Точка, в которую нужно идти
 
         self.hp, self.dmg, self.speed, self.weight = ENEMY_TYPES[complexity]
-        self.radius = 20
+        self.hp = ceil(self.hp * level.difficulty_coeff)
+
         self.view_angle = 0
         self.vx, self.vy = 0, 0
         self.dx, self.dy = 0, 0
 
         self.image = ENEMY_IMAGE
         self.current_image = self.image
-        self.mask = pygame.mask.from_surface(self.image)
 
-        self.rect = pygame.Rect(self.x - self.radius, self.y - self.radius,
-                                self.radius * 2, self.radius * 2)
+        self.rect = self.current_image.get_rect()
+        self.rect.center = self.x, self.y
+        self.collision_rect.center = self.rect.center
 
-        obstacles.append(self.rect)
-        enemy_rects.append(self.rect)
+        obstacles.append(self.collision_rect)
+        enemy_rects.append(self.collision_rect)
         enemies_group.add(self)
+
+    def attack(self):
+        if self.collision_rect.colliderect(player.collision_rect) and player.immortality_timer <= 0:
+            print(f'enemy with {self.hp} hp and {self.dmg} dmg attacked player')
+            player.hp -= self.dmg
+            player.set_immortal()
 
     def move(self):
         # Метод ищет следующую точку пути и меняет значения скорости, если попала пуля
-        ray_coords = (self.rect.topleft, self.rect.topright,
-                      self.rect.bottomright, self.rect.bottomleft)
+        ray_coords = (self.collision_rect.topleft, self.collision_rect.topright,
+                      self.collision_rect.bottomright, self.collision_rect.bottomleft)
         # Проверяет, находится ли игрок в зоне видимости
         if all((in_view(*pos, player.x, player.y, ray_obstacles)
                 for pos in ray_coords)):
             self.view_angle = atan2(player.y - self.y, player.x - self.x)
         else:
             x1, y1 = self.destination
-            self.view_angle = atan2(y1 * level_map.cell_h + level_map.cell_h // 2 - self.y,
-                                    x1 * level_map.cell_w + level_map.cell_w // 2 - self.x)
+            self.view_angle = atan2(y1 * level.cell_h + level.cell_h // 2 - self.y,
+                                    x1 * level.cell_w + level.cell_w // 2 - self.x)
 
         vx0 = cos(self.view_angle) * self.speed
         vy0 = sin(self.view_angle) * self.speed
@@ -485,10 +521,11 @@ class Enemy(Character):
             self.dy = 0
 
     def dead(self):
-        obstacles.remove(self.rect)
-        enemy_rects.remove(self.rect)
+        level.score += 1
+        obstacles.remove(self.collision_rect)
+        enemy_rects.remove(self.collision_rect)
         chance = random()
-        if chance <= 10000:
+        if chance <= 0.4:
             Drop(self.x, self.y)
         self.kill()
 
@@ -496,25 +533,27 @@ class Enemy(Character):
         if self.hp <= 0:
             self.dead()
 
-        self.location = (self.rect.y // level_map.cell_h, self.rect.x // level_map.cell_w)
-        self.destination = level_map.cheapest_path(*self.location)
+        self.view_angle = self.update_angle(player.x, player.y)
+        self.location = (self.y // level.cell_h, self.x // level.cell_w)
+        self.destination = level.cheapest_path(*self.location)
 
         self.move()
+        self.attack()
         self.change_coords()
-        self.x = self.rect.x + self.radius
-        self.y = self.rect.y + self.radius
+        self.x, self.y = self.collision_rect.center
+        self.rect.center = self.x, self.y
         self.current_image = pygame.transform.rotate(self.image, -degrees(self.view_angle))
         SCREEN.blit(self.current_image, self.rect)
 
 
 class Weapon:
     def __init__(self):
-        self.dmg = 70  # Урон пули
+        self.dmg = 40  # Урон пули
         self.reload_speed = 20  # Скорость перезарядки
         self.reload = self.reload_speed  # Таймер для скорости перезарядки
         self.accuracy = 0.1  # Точность
         self.a = -0.5  # Ускроение
-        self.v0 = 50  # Начальная скорость
+        self.v0 = 40  # Начальная скорость
         self.bullets_weight = 10  # Масса пули
         self.multishot = 1  # Кол-во пулек за выстрел
 
@@ -526,7 +565,7 @@ class Weapon:
         phi = atan2(my - y, mx - x)
         for i in range(-self.multishot // 2, self.multishot // 2):
             alpha = randint(-int(self.accuracy * 1000), int(self.accuracy * 1000))
-            Bullet(x, y, phi + alpha / 1000 + i / 100, self.v0, self.a,
+            Bullet(x, y, phi + alpha / 1000 + i * self.accuracy, self.v0, self.a,
                    self.dmg, self.bullets_weight)
 
 
@@ -552,7 +591,7 @@ class Bullet(pygame.sprite.Sprite):
         if self.v <= 0:
             self.kill()
         if self.point.collidelistall(obstacles):
-            self.kill()
+            self.bounce()
         self.hit()
 
         # Приходится сохранять координаты пули, т.к. rect округляет и в конце выходит
@@ -587,17 +626,48 @@ class Bullet(pygame.sprite.Sprite):
                 if (block.bottom - 2 <= y <= block.bottom + 2 or
                         block.top - 2 <= y <= block.top + 2):
                     self.sin_phi = -self.sin_phi
+                    self.phi = -self.phi
                 else:
+                    self.phi = pi - self.phi
                     self.cos_phi = -self.cos_phi
+                self.v -= 5
                 break
 
 
-class Button:
-    def __init__(self, width, height):
+class Widget:
+    def print_text(self, message, x, y, font_color=(0, 0, 0),
+                   font_type=None, font_size=32):
+        font_type = pygame.font.Font(font_type, font_size)
+        text = font_type.render(message, True, font_color)
+        SCREEN.blit(text, (x, y))
+
+
+class InterFace(Widget):
+    def hp_bar(self):
+        width, height = WIDTH // 14, HEIGHT // 40
+        pygame.draw.rect(SCREEN, '#B80A0A', (10, HEIGHT - height - 5,
+                                             player.hp / player.max_hp * width, height))
+        pygame.draw.rect(SCREEN, 'white', (10, HEIGHT - height - 5, width, height), 1)
+        self.print_text(f'{player.hp} / {player.max_hp}', 20, HEIGHT - height - 5,
+                        font_color='white')
+
+    def score_bar(self):
+        x = WIDTH // 2 - (len(str(level.score)) + 7) // 2 * 16
+        y = HEIGHT - HEIGHT // 40 - 5
+        self.print_text(f'SCORE: {level.score}', x, y, font_color='white')
+
+    def update(self):
+        self.score_bar()
+        self.hp_bar()
+
+
+class Button(Widget):
+    def __init__(self, width, height, action=None):
         self.width = width
         self.height = height
+        self.action = action
 
-    def draw(self, x, y, message, action=None):
+    def draw(self, x, y, message):
         mouse = pygame.mouse.get_pos()
         click = pygame.mouse.get_pressed()
         hover_sound = pygame.mixer.Sound('sounds/hover_over_the_button.mp3')
@@ -606,96 +676,13 @@ class Button:
         if x < mouse[0] < x + self.width and y < mouse[1] < y + self.height:
             pygame.draw.rect(SCREEN, (18, 19, 171), (x, y, self.width, self.height))
             if click[0] == 1:
-                if action is not None:
+                if self.action:
                     hover_sound.play()
                     pygame.mixer.music.stop()
-                    action()
+                    self.action()
         else:
             pygame.draw.rect(SCREEN, (68, 53, 212), (x, y, self.width, self.height))
-        self.print_text(message, x + 10, y + 10)
-
-    def print_text(self, message, x, y, font_color=(0, 0, 0),
-                   font_type=None, font_size=32):
-        font_type = pygame.font.Font(font_type, font_size)
-        text = font_type.render(message, True, font_color)
-        SCREEN.blit(text, (x, y))
-
-
-@njit(fastmath=True)
-def ray_cycle(player_x, player_y, view_angle, obstacles, tile_w, tile_h, map_w, map_h, fov):
-    rounded_x = (player_x // tile_w) * tile_w
-    rounded_y = (player_y // tile_h) * tile_h
-    coords = []
-
-    for alpha in range(-fov, fov + 1):  # Цикл по углу обзора
-        alpha = view_angle + alpha / 100
-        sin_a = sin(alpha) if sin(alpha) else 0.000001
-        cos_a = cos(alpha) if cos(alpha) else 0.000001
-        ray_x, ray_y = player_x, player_y
-
-        # Пересечение по вертикали
-        ray_x, dx = (rounded_x + tile_w, 1) if cos_a >= 0 else (rounded_x, -1)
-        found = False
-        for _ in range(0, map_w * tile_w, tile_w):
-            length_v = (ray_x - player_x) / cos_a
-            ray_y = player_y + length_v * sin_a
-
-            for ox, oy, map_w, map_h in obstacles:
-                if ox <= ray_x <= ox + map_w and oy <= ray_y <= oy + map_h:
-                    found = True
-                    break
-            if found:
-                break
-            ray_x += tile_w * dx
-        res_v = (int(ray_x), int(ray_y), length_v)
-
-        # Пересечение по горизонтали
-        ray_y, dy = (rounded_y + tile_h, 1) if sin_a >= 0 else (rounded_y, -1)
-        found = False
-        for _ in range(0, map_h * tile_h, tile_h):
-            length_h = (ray_y - player_y) / sin_a
-            ray_x = player_x + length_h * cos_a
-
-            for ox, oy, map_w, map_h in obstacles:
-                if ox <= ray_x <= ox + map_w and oy <= ray_y <= oy + map_h:
-                    found = True
-                    break
-            if found:
-                break
-            ray_y += tile_h * dy
-        res_h = (int(ray_x), int(ray_y), length_h)
-
-        res = (res_v[0], res_v[1]) if res_v[2] <= res_h[2] else (res_h[0], res_h[1])
-
-        if (len(coords) > 1 and (coords[-1][0] == res[0] and coords[-2][0] == res[0] or
-                                 coords[-1][1] == res[1] and coords[-2][1] == res[1])):
-            coords[-1] = res
-        else:
-            coords.append(res)
-    return coords
-
-
-@njit(fastmath=True)
-def in_view(x1, y1, x2, y2, obstacles):
-    # Рейкаст, но с 1-ой линией, для проверки нахождения объекта в зоне видимости
-    phi = atan2(y2 - y1, x2 - x1)
-    cos_phi = cos(phi)
-    sin_phi = sin(phi)
-    distance = sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
-
-    length = 0
-    ray_x, ray_y = x1, y1
-    while distance > 1:
-        ray_x = x1 + length * cos_phi
-        ray_y = y1 + length * sin_phi
-        distance = sqrt((ray_x - x2) ** 2 + (ray_y - y2) ** 2)
-
-        for ox, oy, map_w, map_h in obstacles:
-            if ox < ray_x < ox + map_w and oy < ray_y < oy + map_h:
-                return False
-        length += 1
-
-    return True
+        self.print_text(message, x + 5, y + 5)
 
 
 def fps_counter():
@@ -707,10 +694,13 @@ def fps_counter():
 
 
 def go_game():
-    global PAUSE
+    init_globals()
+    exit_button = Button(100, 25, start_menu)
     pygame.mixer.music.load('sounds/background_game.mp3')
     pygame.mixer.music.set_volume(0.1)
     pygame.mixer.music.play(-1)
+
+    pause = False
     running = True
     while running:
         for event in pygame.event.get():
@@ -718,33 +708,37 @@ def go_game():
                 running = False
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    PAUSE = True
-        if pygame.mouse.get_pressed()[0]:
-            player.shoot()
-        all_sprites.draw(SCREEN)
+                    pause = not pause
+        if not pause:
+            if pygame.mouse.get_pressed()[0]:
+                player.shoot()
+            all_sprites.draw(SCREEN)
 
-        bullets_group.update()
-        gun.reload -= 1
-        level_map.update()
-        enemies_group.update()
-        spawn_points_group.update()
-        drops_group.update()
-        player.update()
+            bullets_group.update()
+            gun.reload -= 1
+            level.update()
+            enemies_group.update()
+            spawn_points_group.update()
+            drops_group.update()
+            player.update()
 
-        fps_counter()
+            fps_counter()
+        else:
+            exit_button.draw(WIDTH - 120, 10, 'В меню')
+            pygame.mixer.music.stop()
+
+        interface.update()
+
         pygame.display.flip()
         CLOCK.tick(FPS)
 
 
-def clear_objects():
+def clear_groups():
     all_sprites.empty()
     walls_group.empty()
     enemies_group.empty()
     bullets_group.empty()
     spawn_points_group.empty()
-    enemy_rects.clear()
-    obstacles.clear()
-    ray_obstacles.clear()
 
 
 def load_image(name, colorkey=None):
@@ -766,11 +760,12 @@ def load_image(name, colorkey=None):
 
 
 def start_menu():
+    clear_groups()
     menu_background = pygame.image.load('pictures/menu.jpg')
 
     font_game = pygame.font.Font(None, 112)
-    start_button = Button(280, 70)
-    quit_button = Button(280, 70)
+    start_button = Button(280, 70, go_game)
+    quit_button = Button(280, 70, quit)
     pygame.mixer.music.load('sounds/background_menu.mp3')
     pygame.mixer.music.set_volume(0.2)
     pygame.mixer.music.play(-1)
@@ -783,33 +778,36 @@ def start_menu():
                 if event.key == pygame.K_ESCAPE:
                     exit()
         SCREEN.blit(menu_background, (0, 0))
-        SCREEN.blit(font_game.render('Ray Shooter', True, (18, 19, 171)),
-                    font_game.render('Ray Shooter', True, (18, 19, 171)).get_rect(
+        SCREEN.blit(font_game.render('Dark Hell', True, (18, 19, 171)),
+                    font_game.render('Dark Hell', True, (18, 19, 171)).get_rect(
                         center=(500, 300)))
-        start_button.draw(270, 600, 'Начать игру', go_game)
-        quit_button.draw(270, 700, 'Выход', quit)
+        start_button.draw(270, 600, 'Начать игру')
+        quit_button.draw(270, 700, 'Выход')
         pygame.display.update()
         CLOCK.tick(60)
 
 
-def pause():
-    pass
-
-
-if __name__ == '__main__':
-    all_sprites = pygame.sprite.Group()
-    walls_group = pygame.sprite.Group()
-    enemies_group = pygame.sprite.Group()
-    bullets_group = pygame.sprite.Group()
-    spawn_points_group = pygame.sprite.Group()
-    drops_group = pygame.sprite.Group()
-
-    level_map = Level()
+def init_globals():
+    global player, level, floor, gun, enemy_rects, obstacles, ray_obstacles, interface
+    level = Level()
+    interface = InterFace()
     floor = Floor()
     gun = Weapon()
+    player = Player(100, 10)
     enemy_rects = []
     obstacles = [wall.rect for wall in walls_group]  # Спиоск всех преград
     ray_obstacles = List([(wall.rect.x, wall.rect.y,
                            wall.rect.w, wall.rect.h) for wall in walls_group])
+
+
+if __name__ == '__main__':
+    level = Level()
+    interface = InterFace()
+    floor = Floor()
+    gun = Weapon()
     player = Player(100, 10)
+    enemy_rects = []
+    obstacles = [wall.rect for wall in walls_group]  # Спиоск всех преград
+    ray_obstacles = List([(wall.rect.x, wall.rect.y,
+                           wall.rect.w, wall.rect.h) for wall in walls_group])
     start_menu()
