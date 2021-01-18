@@ -16,7 +16,7 @@ SCREEN = pygame.display.set_mode(size, flags=pygame.FULLSCREEN)
 FPS = 60
 CLOCK = pygame.time.Clock()
 
-LEVEL = 3
+LEVEL = randint(1, 5)
 ENEMY_TYPES = [(40, 10, 4, 10), (100, 5, 3, 25), (150, 5, 2, 50)]
 
 ENEMY_IMAGE = pygame.image.load('data/enemy.png').convert_alpha()
@@ -699,6 +699,7 @@ def go_game():
     pygame.mixer.music.load('sounds/background_game.mp3')
     pygame.mixer.music.set_volume(0.1)
     pygame.mixer.music.play(-1)
+    music = True
 
     pause = False
     running = True
@@ -710,6 +711,7 @@ def go_game():
                 if event.key == pygame.K_ESCAPE:
                     pause = not pause
         if not pause:
+            pygame.mixer.music.unpause()
             if pygame.mouse.get_pressed()[0]:
                 player.shoot()
             all_sprites.draw(SCREEN)
@@ -725,7 +727,7 @@ def go_game():
             fps_counter()
         else:
             exit_button.draw(WIDTH - 120, 10, 'В меню')
-            pygame.mixer.music.stop()
+            pygame.mixer.music.pause()
 
         interface.update()
 
@@ -761,7 +763,7 @@ def load_image(name, colorkey=None):
 
 def start_menu():
     clear_groups()
-    menu_background = pygame.image.load('pictures/menu.jpg')
+    menu_background = pygame.image.load('pictures/menu.jpg').
 
     font_game = pygame.font.Font(None, 112)
     start_button = Button(280, 70, go_game)
