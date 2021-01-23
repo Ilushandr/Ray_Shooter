@@ -65,7 +65,6 @@ def in_view(x1, y1, x2, y2, obstacles):
     distance = sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
 
     length = 0
-    ray_x, ray_y = x1, y1
     while distance > 1:
         ray_x = x1 + length * cos_phi
         ray_y = y1 + length * sin_phi
