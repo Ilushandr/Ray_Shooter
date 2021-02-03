@@ -176,10 +176,12 @@ class Level:
         return row, col
 
     def update_score(self):
+        # Увеличивает счетчик
         self.score += 1
         self.difficulty_changed = False
 
     def update_difficulty(self):
+        # Изменение сложности игры каждые 10 очков
         if self.score and self.score % 10 == 0 and not self.difficulty_changed:
             self.difficulty_changed = True
             self.difficulty_coeff *= 1.5
@@ -190,7 +192,7 @@ class Level:
 
 
 class SpawnPoint(pygame.sprite.Sprite):
-    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS):
+    def __init__(self, x, y, types=(0, 1, 2), spawn_time=FPS * 7):
         super().__init__(spawn_points_group)
         self.x, self.y = x, y
         self.types = types  # Типы врагов
@@ -199,6 +201,8 @@ class SpawnPoint(pygame.sprite.Sprite):
         self.last_enemy = None
 
     def can_spawn(self):
+        # Проверяет, можно ли заспавнить врага и мониторит, не находится ли последний заспавненный
+        # враг в точке спавна
         if not self.last_enemy:
             return True
         return (self.timer <= 0 and
@@ -208,7 +212,7 @@ class SpawnPoint(pygame.sprite.Sprite):
 
     def update_difficulty(self):
         if self.spawn_time > FPS // 2:
-            self.spawn_time = FPS / level.difficulty_coeff
+            self.spawn_time = FPS * 7 / level.difficulty_coeff
 
     def update(self):
         if level.difficulty_changed and self.spawn_time > FPS:
@@ -416,9 +420,11 @@ class Player(Character):
         pygame.draw.polygon(SCREEN, 'black', coords)
 
     def set_immortal(self):
+        # Устанавливает бессмертие у игрока после получения урона
         self.immortality_timer = 45
 
     def shoot(self):
+        # Отвечает за выстрелы игрока
         if gun.reload < 0:
             gun.shot(self.x + self.rect.w / 2 * cos(self.view_angle),
                      self.y + self.rect.h / 2 * sin(self.view_angle))
@@ -460,7 +466,7 @@ class Enemy(Character):
 
         self.hp, self.dmg, self.speed = ENEMY_TYPES[complexity]
         self.hp = ceil(self.hp * level.difficulty_coeff)
-        self.speed_debuff = 0  # Дебафф к скорости при поада
+        self.speed_debuff = 0  # Дебафф к скорости при попадании
 
         self.view_angle = 0
 
@@ -513,10 +519,12 @@ class Enemy(Character):
             self.in_spawn_point = False
 
     def set_impact(self):
+        # Замедляет игрока при попадании
         self.speed_debuff = self.speed * 0.5
         self.bleed(-10)
 
     def update_impact(self):
+        # Отсчитывет время замедления врага
         if self.speed_debuff > 0:
             self.speed_debuff -= self.speed * 0.01
 
@@ -528,15 +536,10 @@ class Enemy(Character):
         if all((in_view(*pos, player.collision_rect.centerx,
                         player.collision_rect.centery, ray_obstacles) for pos in ray_coords)):
             self.view_angle = atan2(player.y - self.y, player.x - self.x)
-            # pygame.draw.rect(SCREEN, 'green', self.collision_rect)
         else:
             x1, y1 = self.destination
             self.view_angle = atan2(y1 * level.cell_h + level.cell_h // 2 - self.y,
                                     x1 * level.cell_w + level.cell_w // 2 - self.x)
-            # pygame.draw.rect(SCREEN, 'yellow', self.collision_rect)
-            # pygame.draw.line(SCREEN, 'red', self.collision_rect.center,
-            #                  (x1 * level.cell_w + level.cell_w // 2,
-            #                   y1 * level.cell_h + level.cell_h // 2), 5)
 
         vx = cos(self.view_angle) * (self.speed - self.speed_debuff)
         vy = sin(self.view_angle) * (self.speed - self.speed_debuff)
@@ -706,7 +709,15 @@ class InterFace(Widget):
         y = HEIGHT - HEIGHT // 40 - 5
         self.print_text(f'SCORE: {level.score}', x, y, font_color='white')
 
+    def fps_counter(self):
+        font = pygame.font.Font(None, 20)
+        text = font.render(str(round(CLOCK.get_fps(), 4)), True, 'white')
+        text_x = 0
+        text_y = 0
+        SCREEN.blit(text, (text_x, text_y))
+
     def update(self, pause):
+        self.fps_counter()
         if not (player.is_dead or pause):
             self.hp_bar()
             self.score_bar()
@@ -740,14 +751,6 @@ class Button(Widget):
         self.print_text(message, x + 5, y + 5)
 
 
-def fps_counter():
-    font = pygame.font.Font(None, 20)
-    text = font.render(str(round(CLOCK.get_fps(), 4)), True, 'white')
-    text_x = 0
-    text_y = 0
-    SCREEN.blit(text, (text_x, text_y))
-
-
 def go_game():
     init_globals()
     exit_button = Button(100, 25, start_menu)
@@ -779,7 +782,6 @@ def go_game():
             player.update()
             # walls_group.update()
 
-            fps_counter()
         else:
             exit_button.draw(WIDTH - 120, 10, 'В меню')
             pygame.mixer.music.pause()
